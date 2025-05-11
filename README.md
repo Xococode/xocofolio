@@ -1,5 +1,21 @@
 # Guía de Uso del Editor de Imágenes Avanzado (Multi-Página)
 
+
+![XOCOFOLIO](xocofolio.jpg)
+
+
+## Acceso Rápido a la Aplicación
+[XOCOFOLIO - Demo en vivo](https://xococode.github.io/xocofolio/)
+
+
+
+
+
+
+
+
+
+
 Este editor basado en Fabric.js está diseñado para crear y editar diseños de varias páginas de forma intuitiva. A continuación encontrarás las principales áreas y funcionalidades desde el punto de vista del usuario.
 
 ---
