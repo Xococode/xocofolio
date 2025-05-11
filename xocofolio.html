@@ -1,0 +1,2003 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Editor de Imágenes Avanzado (Multi-Página)</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/fabric.js/5.3.1/fabric.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <!-- html2canvas no se usa activamente, pero se mantiene por si acaso -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+
+    <style>
+        /* General Styles */
+        body, html { margin: 0; padding: 0; height: 100%; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #f0f2f5; overflow: hidden; font-size: 14px; color: #333; }
+        .editor-container { display: flex; height: 100vh; width: 100vw; }
+        button:disabled { opacity: 0.5; cursor: not-allowed; }
+        input[type="color"] { min-width: 24px; width: 24px; height: 24px; border: 1px solid #ccc; padding: 0; vertical-align: middle; border-radius: 4px; cursor: pointer;}
+        label { margin-right: 5px; vertical-align: middle; }
+        select { padding: 4px 6px; border-radius: 4px; border: 1px solid #ccc; font-family: inherit; font-size: 13px; vertical-align: middle;}
+
+
+        /* Sidebar */
+        .sidebar { width: 280px; background-color: #ffffff; border-right: 1px solid #e0e0e0; display: flex; flex-direction: column; overflow: hidden; }
+        .sidebar-section { padding: 12px; border-bottom: 1px solid #f0f0f0; }
+        .search-input-wrapper { display: flex; align-items: center; background-color: #f5f5f5; border-radius: 20px; padding: 8px 12px; border: 1px solid #e0e0e0; }
+        .search-input-wrapper svg { margin-right: 8px; color: #666; }
+        .search-input-wrapper input { border: none; background: transparent; outline: none; width: 100%; font-size: 14px; }
+        .search-input-wrapper input::placeholder { color: #666; }
+        .action-buttons { display: flex; gap: 8px; }
+        .main-btn { flex-grow: 1; padding: 10px; background-color: #6a0dad; color: white; border: none; border-radius: 6px; font-weight: 500; cursor: pointer; text-align: center; font-size: 14px; }
+        .main-btn:hover { background-color: #580bac; }
+        .icon-btn { width: 36px; height: 36px; padding:0; background-color: #f5f5f5; border: 1px solid #e0e0e0; border-radius: 6px; display: flex; align-items: center; justify-content: center; cursor: pointer; color: #555; }
+        .icon-btn:hover { background-color: #e9e9e9; }
+        .sidebar-tabs { display: flex; padding: 0; /* Removed sidebar-section class */ }
+        .tab { flex: 1; text-align: center; padding: 12px 8px; cursor: pointer; color: #666; font-weight: 500; position: relative; font-size: 14px; border-bottom: 1px solid #f0f0f0; }
+        .tab.active { color: #000; border-bottom-color: #6a0dad; }
+        .tab.active::after { content: ''; position: absolute; bottom: -1px; left: 0; width: 100%; height: 2px; background-color: #6a0dad; }
+
+        .sidebar-content-area { flex-grow: 1; overflow-y: auto; }
+        .sidebar-panel { display: none; padding: 8px; }
+        .sidebar-panel.active { display: block; }
+
+        .sidebar-image-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; }
+        .sidebar-image-item { border-radius: 6px; overflow: hidden; position: relative; aspect-ratio: 1 / 1; background-color: #f0f0f0; cursor: grab; display: flex; align-items: center; justify-content: center; border: 1px solid #ddd; }
+        .sidebar-image-item img { max-width: 90%; max-height: 90%; object-fit: contain; display: block; }
+        .sidebar-image-item .img-name { position: absolute; bottom: 0; left: 0; right: 0; background: rgba(0,0,0,0.6); color: white; font-size: 10px; padding: 3px 4px; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+        .preset-text-btn {
+            display: block;
+            width: calc(100% - 10px);
+            margin: 5px;
+            padding: 12px 10px;
+            background-color: #fff;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            text-align: left;
+            cursor: grab;
+            font-family: inherit;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+        }
+        .preset-text-btn:hover { background-color: #f9f9f9; border-color: #ccc; }
+        .preset-text-title { font-size: 20px; font-weight: bold; }
+        .preset-text-subtitle { font-size: 16px; font-weight: 500; }
+        .preset-text-body { font-size: 13px; }
+
+
+        /* Main Content */
+        .main-content { flex: 1; display: flex; flex-direction: column; height: 100%; overflow: hidden; background-color: #f9fafb; }
+
+        /* Top Toolbar */
+        .top-toolbar { display: flex; padding: 0 12px; border-bottom: 1px solid #e0e0e0; background-color: #ffffff; align-items: center; justify-content: space-between; height: auto; min-height: 48px; box-sizing: border-box; flex-wrap: wrap; gap: 8px; }
+        .toolbar-group { display: flex; align-items: center; gap: 6px; }
+        .top-tool-btn { padding: 6px 10px; border-radius: 4px; cursor: pointer; background: #eef2f9; border: 1px solid #d1d9e6; color: #333; font-weight: 500; font-size: 13px; }
+        .top-tool-btn:hover { background: #e0e8f3; }
+        .top-icon-btn { padding: 6px 8px; border-radius: 4px; cursor: pointer; background: none; border: none; font-size: 13px; color: #555; display: flex; align-items: center; gap: 4px; }
+        .top-icon-btn:hover, .top-icon-btn.active-tool, .top-icon-btn.active { background-color: #e0e8f3; }
+        .top-icon-btn svg { width: 16px; height: 16px; }
+        .separator { width: 1px; height: 20px; background-color: #d0d0d0; margin: 0 4px; }
+
+        .contextual-controls { display: none; align-items: center; gap: 6px; margin-left: 8px; }
+        .contextual-controls.active { display: flex; }
+        #text-controls-container input[type="number"] { width: 40px; padding: 3px; font-size: 13px; text-align: center;}
+        #opacity-controls-container input[type="range"] { width: 80px; vertical-align: middle; accent-color: #6a0dad;}
+        #opacity-controls-container span { font-size: 12px; min-width: 30px; text-align: right; }
+
+
+        .export-options { display: none; position: absolute; background-color: white; border: 1px solid #ccc; box-shadow: 0 2px 5px rgba(0,0,0,0.1); border-radius: 4px; z-index: 100; top: 100%; right: 0; min-width: 190px;}
+        .export-options.active { display: block; }
+        .export-options button { display: block; width: 100%; padding: 8px 12px; text-align: left; background: none; border: none; cursor: pointer; font-size: 13px;}
+        .export-options button:hover { background-color: #f0f0f0; }
+        .toolbar-group.export-group { position: relative; }
+
+
+        /* Canvas Area */
+        .canvas-area { flex-grow: 1; position: relative; display: flex; align-items: center; justify-content: center; padding: 0; overflow: hidden; background-image: radial-gradient(hsl(0, 0%, 82%) 0.5px, transparent 0.5px); background-size: 15px 15px; }
+        .canvas-wrapper { position: relative; display: flex; }
+        #editorCanvas { display: block; }
+
+
+        /* Object Actions Bar */
+        .object-actions-bar { position: absolute; background-color: white; border-radius: 6px; box-shadow: 0 2px 8px rgba(0,0,0,0.15); padding: 4px; z-index: 1000; display: flex; gap: 2px; transform: translate(-50%, -100%); }
+        .action-icon-btn { width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; border: none; background: none; cursor: pointer; border-radius: 4px; color: #555; }
+        .action-icon-btn:hover { background-color: #f0f0f0; }
+        .action-icon-btn svg { width: 16px; height: 16px; }
+
+        /* Custom Context Menu */
+        #custom-context-menu { display: none; position: absolute; background-color: white; border: 1px solid #ccc; box-shadow: 0 2px 5px rgba(0,0,0,0.15); border-radius: 4px; z-index: 2000; padding: 5px 0; min-width: 180px;}
+        #custom-context-menu button {
+            display: block;
+            width: 100%;
+            padding: 8px 15px;
+            text-align: left;
+            background: none;
+            border: none;
+            cursor: pointer;
+            font-size: 13px;
+            color: #333;
+        }
+        #custom-context-menu button:hover {
+            background-color: #f0f0f0;
+        }
+
+
+        /* Bottom Bar */
+        .bottom-bar { display: flex; justify-content: space-between; align-items: center; padding: 0 16px; background-color: #ffffff; border-top: 1px solid #e0e0e0; height: 40px; box-sizing: border-box; z-index: 5; min-height: 40px; }
+        .bottom-bar-group { display: flex; align-items: center; gap: 10px; }
+        .bottom-bar-left { flex-basis: 33%; justify-content: flex-start; white-space: nowrap;}
+        .bottom-bar-center { flex-grow: 1; justify-content: center; }
+        .bottom-bar-right { flex-basis: 33%; justify-content: flex-end; white-space: nowrap;}
+        .bottom-tool-btn { background: none; border: none; cursor: pointer; color: #555; display: flex; align-items: center; padding: 6px 8px; border-radius: 4px; font-size: 13px; }
+        .bottom-tool-btn:hover { background-color: #f0f0f0; }
+        .bottom-tool-btn svg { margin-right: 4px; width: 16px; height: 16px; }
+        .zoom-control-btn { background: none; border: 1px solid #ccc; color: #555; width: 24px; height: 24px; border-radius: 4px; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 14px; }
+        .zoom-control-btn:hover { background-color: #f0f0f0; }
+        #zoom-level { min-width: 45px; text-align: center; color: #333; font-size: 13px; margin: 0 4px; display: none; }
+        .zoom-slider-input { width: 100px; margin: 0 5px; accent-color: #6a0dad; height: 4px; }
+        .zoom-slider-input::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 12px; height: 12px; background: #6a0dad; border-radius: 50%; cursor: pointer; }
+        .zoom-slider-input::-moz-range-thumb { width: 12px; height: 12px; background: #6a0dad; border-radius: 50%; cursor: pointer; border: none; }
+        #page-size-controls { display: none; gap: 5px; align-items: center;}
+        #page-size-controls input {width: 50px; padding: 2px;}
+
+        /* Modals */
+        .modal { display: none; position: fixed; z-index: 1001; left: 0; top: 0; width: 100%; height: 100%; overflow: auto; background-color: rgba(0,0,0,0.4); justify-content: center; align-items: center; }
+        .modal.active { display: flex; }
+        .modal-content { background-color: #fefefe; margin: auto; padding: 20px; border: 1px solid #888; border-radius: 8px; width: 80%; max-width: 500px; box-shadow: 0 4px 8px rgba(0,0,0,0.2); }
+        .modal-header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #eee; padding-bottom: 10px; margin-bottom: 10px; }
+        .modal-header h2 { margin: 0; font-size: 18px; }
+        .close-btn { color: #aaa; font-size: 28px; font-weight: bold; cursor: pointer; }
+        .close-btn:hover, .close-btn:focus { color: black; text-decoration: none; }
+        #notes-textarea { width: calc(100% - 20px); min-height: 150px; padding: 10px; border: 1px solid #ccc; border-radius: 4px; font-family: inherit; font-size: 14px; margin-bottom: 10px; }
+        .modal-footer { text-align: right; }
+        .modal-btn { padding: 8px 15px; border-radius: 4px; border: none; cursor: pointer; }
+        .save-notes-btn { background-color: #6a0dad; color: white; }
+        .save-notes-btn:hover { background-color: #580bac; }
+
+        /* Layers Panel (in Modal) */
+        #layers-list-container { max-height: 300px; overflow-y: auto; border: 1px solid #eee; margin-bottom: 10px; }
+        .layer-item { display: flex; align-items: center; padding: 8px; border-bottom: 1px solid #f0f0f0; background-color: #fff; }
+        .layer-item:last-child { border-bottom: none; }
+        .layer-item.selected { background-color: #e6f7ff; }
+        .layer-name { flex-grow: 1; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .layer-actions button { background: none; border: none; cursor: pointer; margin-left: 5px; color: #555; }
+        .layer-actions button:hover { color: #000; }
+        .layer-actions svg { width: 14px; height: 14px; vertical-align: middle; }
+
+        .hidden-file-input { display: none; }
+    </style>
+</head>
+<body>
+    <input type="file" id="image-upload-input" class="hidden-file-input" accept="image/*" multiple>
+    <input type="file" id="project-file-input" class="hidden-file-input" accept=".canvaedit,application/json">
+
+    <div class="editor-container">
+        <div class="sidebar">
+            <div style="padding: 15px 12px 5px; text-align: center; border-bottom: 1px solid #f0f0f0;">
+                <a href="https://xocostudio.com/" target="_blank" style="text-decoration: none; color: #333; font-size: 20px; font-weight: bold;">
+                    XOCOFOLIO
+                </a>
+            </div>
+            <div class="sidebar-section">
+                <div class="search-input-wrapper">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"></path></svg>
+                    <input type="text" id="image-search-input" placeholder="Buscar imágenes por ID">
+                </div>
+            </div>
+            <div class="sidebar-section action-buttons">
+                <button class="main-btn" id="trigger-image-upload">Subir archivos</button>
+                <button class="icon-btn" title="Más opciones">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z"></path></svg>
+                </button>
+            </div>
+            <div class="sidebar-tabs">
+                <div class="tab active" data-tab-content="images-panel">Imágenes</div>
+                <div class="tab" data-tab-content="text-presets-panel">Texto</div>
+            </div>
+            <div class="sidebar-content-area">
+                <div id="images-panel" class="sidebar-panel active">
+                    <div class="sidebar-image-grid" id="sidebar-image-container"></div>
+                </div>
+                <div id="text-presets-panel" class="sidebar-panel">
+                    <p style="font-size: 13px; color: #555; margin: 5px 5px 10px;">Estilos de texto predeterminados</p>
+                    <button class="preset-text-btn preset-text-title" data-text-type="title" draggable="true">Añadir un título</button>
+                    <button class="preset-text-btn preset-text-subtitle" data-text-type="subtitle" draggable="true">Añadir un subtítulo</button>
+                    <button class="preset-text-btn preset-text-body" data-text-type="body" draggable="true">Añadir un poco de texto</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="main-content">
+            <div class="top-toolbar">
+                <div class="toolbar-group">
+                    <button class="top-icon-btn" id="save-project-btn" title="Guardar Proyecto (Ctrl+S)">
+                        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M17 3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V7l-4-4zm-5 16c-1.66 0-3-1.34-3-3s1.34-3 3-3 3 1.34 3 3-1.34 3-3 3zm3-10H5V5h10v4z"></path></svg>
+                    </button>
+                    <button class="top-icon-btn" id="save-as-project-btn" title="Guardar Proyecto Como...">
+                        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M17 3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V7l-4-4zm-5 16c-1.66 0-3-1.34-3-3s1.34-3 3-3 3 1.34 3 3-1.34 3-3 3zm3-10H5V5h10v4z"></path></svg>
+                        <!-- Podrías añadir un pequeño texto aquí si es necesario, como "..." o un símbolo, o usar un SVG diferente.
+                             Para simplicidad, uso el mismo icono de guardar por ahora. -->
+                    </button>
+                    <button class="top-icon-btn" id="load-project-btn" title="Cargar Proyecto">
+                        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"></path></svg>
+                    </button>
+                    <div class="separator"></div>
+                    <button class="top-icon-btn" id="undo-btn" title="Deshacer (Ctrl+Z)" disabled><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12.5 8c-2.65 0-5.05.99-6.9 2.6L2 7v9h9l-3.62-3.62c1.39-1.16 3.16-1.88 5.12-1.88 3.54 0 6.55 2.31 7.6 5.5l2.37-.78C21.08 11.03 17.15 8 12.5 8z"></path></svg></button>
+                    <button class="top-icon-btn" id="redo-btn" title="Rehacer (Ctrl+Y)" disabled><svg viewBox="0 0 24 24" fill="currentColor"><path d="M18.4 10.6C16.55 8.99 14.15 8 11.5 8c-4.65 0-8.58 3.03-9.96 7.22L3.91 16c1.05-3.19 4.05-5.5 7.59-5.5 1.96 0 3.73.72 5.12 1.88L13 16h9V7l-3.6 3.6z"></path></svg></button>
+                    <div class="separator"></div>
+                    <button class="top-icon-btn" id="add-text-btn" title="Añadir Texto Personalizado"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M2.5 4v3h5v12h3V7h5V4h-13zm19 5h-9v3h3v7h3v-7h3V9z"></path></svg></button>
+                    <button class="top-icon-btn" id="drawing-mode-btn" title="Modo Dibujo"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34a.9959.9959 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"></path></svg></button>
+                    <div class="separator"></div>
+                     <button class="top-icon-btn" id="add-new-page-btn" title="Añadir Nueva Página">
+                        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm-1 7V4l5 5h-5zm5 11H6V4h7v5h5v11zM8 13h2v2H8v-2zm0 3h2v2H8v-2zm0 3h2v2H8v-2zm8-6h-5v2h5v-2zm0 3h-5v2h5v-2zm0 3h-5v2h5v-2z"/></svg>
+                    </button>
+                    <button class="top-icon-btn" id="delete-active-page-btn" title="Eliminar Página Activa" disabled>
+                        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zm2.46-7.12l1.41-1.41L12 12.59l2.12-2.12 1.41 1.41L13.41 14l2.12 2.12-1.41 1.41L12 15.41l-2.12 2.12-1.41-1.41L10.59 14l-2.13-2.12zM15.5 4l-1-1h-5l-1 1H5v2h14V4z"/></svg>
+                    </button>
+                    <div class="separator"></div>
+                    <button class="top-icon-btn" id="bring-forward-btn" title="Traer adelante"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 8l-6 6h12l-6-6z"></path></svg></button>
+                    <button class="top-icon-btn" id="send-backward-btn" title="Enviar atrás"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 16l6-6H6l6 6z"></path></svg></button>
+                </div>
+
+                <div id="drawing-controls-container" class="contextual-controls drawing-controls">
+                    <label for="brush-color">Color:</label><input type="color" id="brush-color" value="#000000">
+                    <div class="separator"></div>
+                    <label for="brush-size">Tamaño:</label><input type="range" id="brush-size" min="1" max="50" value="5"><span id="brush-size-label">5</span>
+                </div>
+                <div id="text-controls-container" class="contextual-controls text-controls">
+                    <select id="font-family-select"><option value="Arial">Arial</option><option value="Verdana">Verdana</option><option value="Times New Roman">Times New Roman</option><option value="Courier New">Courier New</option><option value="Georgia">Georgia</option><option value="Comic Sans MS">Comic Sans MS</option><option value="Impact">Impact</option><option value="Libre Baskerville" selected>Libre Baskerville</option></select>
+                    <input type="number" id="font-size-input" value="20" min="8">
+                    <button class="top-icon-btn" id="font-bold-btn" title="Negrita"><b>B</b></button>
+                    <button class="top-icon-btn" id="font-italic-btn" title="Cursiva"><i>I</i></button>
+                    <button class="top-icon-btn" id="font-underline-btn" title="Subrayado"><u>U</u></button>
+                    <label for="text-color-input">Color:</label><input type="color" id="text-color-input" value="#000000">
+                </div>
+                <div id="opacity-controls-container" class="contextual-controls">
+                    <label for="opacity-slider">Opacidad:</label>
+                    <input type="range" id="opacity-slider" min="0" max="100" value="100">
+                    <span id="opacity-value-label">100%</span>
+                </div>
+
+                <div class="toolbar-group" style="margin-left: auto;">
+                    <button class="top-icon-btn" id="layers-panel-btn" title="Posición (Capas)"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 16.5l4-4H8zm0-9l-4 4h8zM3 19h18v2H3zm0-8h18v2H3zm0-8h18v2H3z"></path></svg></button>
+                    <button class="top-icon-btn" id="toggle-page-visibility-btn" title="Mostrar/Ocultar Página Activa"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5C21.27 7.61 17 4.5 12 4.5zm0 12.5c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"></path></svg></button>
+                    <button class="top-icon-btn" id="page-size-toggle-btn" title="Tamaño de Página Activa"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M21 6H3c-1.1 0-2 .9-2 2v8c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2zm0 10H3V8h18v8zM9 10h6v2H9zm0 3h6v2H9z"></path></svg></button>
+                    <div id="page-size-controls" style="display:none;"><label>W:</label><input type="number" id="page-width-input" value="800"><label>H:</label><input type="number" id="page-height-input" value="600"></div>
+                     <div class="toolbar-group">
+                        <label for="export-resolution-slider" style="font-size:12px;">Res. Exp.:</label>
+                        <input type="range" id="export-resolution-slider" min="1" max="5" value="2.5" step="0.1" style="width:80px; vertical-align: middle; accent-color: #6a0dad;">
+                        <span id="export-resolution-value" style="font-size:12px; min-width:30px; text-align:left;">2.5x</span>
+                    </div>
+                    <div class="toolbar-group export-group">
+                        <button class="top-icon-btn" id="export-btn-main" title="Exportar"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"></path></svg>Exportar</button>
+                        <div class="export-options" id="export-options-dropdown">
+                            <button id="export-active-page-png-btn">Pág. Activa (PNG)</button>
+                            <button id="export-active-page-jpg-btn">Pág. Activa (JPG)</button>
+                            <button id="export-active-page-pdf-btn">Pág. Activa (PDF)</button>
+                            <div style="height: 1px; background-color: #eee; margin: 5px 0;"></div>
+                            <button id="export-all-pages-png-btn">Todas Págs. (PNG ZIP)</button>
+                            <button id="export-all-pages-jpg-btn">Todas Págs. (JPG ZIP)</button>
+                            <button id="export-all-pages-pdf-btn">Todas Págs. (PDF)</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="canvas-area" id="canvas-drop-area">
+                <div id="selected-object-toolbar" class="object-actions-bar" style="display: none;">
+                    <button class="action-icon-btn" id="lock-object-btn" title="Bloquear/Desbloquear"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-6 9c-1.1 0-2-.9-2-2s-.9-2 2-2 2 .9 2 2-.9 2-2 2zm3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1s3.1 1.39 3.1 3.1v2z"></path></svg></button>
+                    <button class="action-icon-btn" id="duplicate-object-btn" title="Duplicar"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"></path></svg></button>
+                    <button class="action-icon-btn" id="delete-object-btn" title="Eliminar"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"></path></svg></button>
+                    <button class="action-icon-btn" id="more-object-actions-btn" title="Más opciones (Clic Derecho)"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z"></path></svg></button>
+                </div>
+                <div class="canvas-wrapper"><canvas id="editorCanvas"></canvas></div>
+            </div>
+
+            <div class="bottom-bar">
+                <div class="bottom-bar-group bottom-bar-left">
+                    <button class="bottom-tool-btn" id="notes-btn"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34a.9959.9959 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"></path></svg>Notas</button>
+                    <span id="object-coordinates-display" style="font-size: 12px; color: #555; margin-left: 10px; min-width: 120px;">X: --, Y: --</span>
+                </div>
+                <div class="bottom-bar-group bottom-bar-center">
+                    <button class="zoom-control-btn" id="zoom-out">-</button>
+                    <span id="zoom-level">100%</span>
+                    <input type="range" id="zoom-slider" min="10" max="500" value="100" class="zoom-slider-input">
+                    <button class="zoom-control-btn" id="zoom-in">+</button>
+                    <button class="zoom-control-btn" title="Ajustar a Pantalla" id="zoom-fit"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z"></path></svg></button>
+                </div>
+                <div class="bottom-bar-group bottom-bar-right">
+                    <button class="bottom-tool-btn" id="prev-page-btn" title="Página Anterior" disabled><svg viewBox="0 0 24 24" fill="currentColor"><path d="M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z"></path></svg></button>
+                    <span>Pág. <span id="current-page-indicator">0</span>/<span id="total-pages-indicator">0</span></span>
+                    <button class="bottom-tool-btn" id="next-page-btn" title="Siguiente Página" disabled><svg viewBox="0 0 24 24" fill="currentColor"><path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"></path></svg></button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="custom-context-menu">
+        <button data-action="duplicate">Duplicar</button>
+        <button data-action="lock">Bloquear/Desbloquear</button>
+        <button data-action="delete">Eliminar</button>
+        <div style="height: 1px; background-color: #eee; margin: 5px 0;"></div>
+        <button data-action="bringForward">Traer adelante</button>
+        <button data-action="sendBackward">Enviar atrás</button>
+        <button data-action="bringToFront">Traer al frente</button>
+        <button data-action="sendToBack">Enviar al fondo</button>
+    </div>
+
+    <div id="notes-modal" class="modal"><div class="modal-content"><div class="modal-header"><h2>Notas</h2><span class="close-btn" id="close-notes-modal">×</span></div><textarea id="notes-textarea" placeholder="Escribe tus notas aquí..."></textarea><div class="modal-footer"><button class="modal-btn save-notes-btn" id="save-notes-btn">Guardar Notas</button></div></div></div>
+    <div id="layers-panel-modal" class="modal"><div class="modal-content"><div class="modal-header"><h2>Capas</h2><span class="close-btn" id="close-layers-modal">×</span></div><div id="layers-list-container"></div></div></div>
+
+    <script>
+    document.addEventListener('DOMContentLoaded', function() {
+        const { jsPDF } = window.jspdf;
+        const JSZip = window.JSZip;
+
+        const MAX_PAGES = 3; 
+
+        const VIRTUAL_CANVAS_SIZE = 8000; 
+        const canvas = new fabric.Canvas('editorCanvas', {
+            width: VIRTUAL_CANVAS_SIZE,
+            height: VIRTUAL_CANVAS_SIZE,
+            preserveObjectStacking: true,
+            stopContextMenu: true,
+            fireRightClick: true,
+            controlsAboveOverlay: true,
+            imageSmoothingEnabled: false, 
+        });
+        const canvasArea = document.querySelector('.canvas-area');
+
+        // Sidebar elements
+        const sidebarImageContainer = document.getElementById('sidebar-image-container');
+        const imageSearchInput = document.getElementById('image-search-input');
+        const triggerImageUploadBtn = document.getElementById('trigger-image-upload');
+        const imageUploadInput = document.getElementById('image-upload-input');
+        const sidebarTabs = document.querySelectorAll('.sidebar-tabs .tab');
+        const sidebarPanels = document.querySelectorAll('.sidebar-content-area .sidebar-panel');
+        const presetTextButtons = document.querySelectorAll('.preset-text-btn');
+
+        // Top toolbar general elements
+        const undoBtn = document.getElementById('undo-btn');
+        const redoBtn = document.getElementById('redo-btn');
+        const saveProjectBtn = document.getElementById('save-project-btn');
+        const saveAsProjectBtn = document.getElementById('save-as-project-btn');
+        const loadProjectBtn = document.getElementById('load-project-btn');
+        const projectFileInput = document.getElementById('project-file-input');
+
+        // Top toolbar object manipulation elements
+        const bringForwardBtn = document.getElementById('bring-forward-btn');
+        const sendBackwardBtn = document.getElementById('send-backward-btn');
+        const layersPanelBtn = document.getElementById('layers-panel-btn');
+
+        // Top toolbar tool activation buttons
+        const addTextBtn = document.getElementById('add-text-btn');
+        const drawingModeBtn = document.getElementById('drawing-mode-btn');
+
+        // Contextual toolbars (Text, Drawing, Opacity)
+        const textControlsContainer = document.getElementById('text-controls-container');
+        const fontFamilySelect = document.getElementById('font-family-select');
+        const fontSizeInput = document.getElementById('font-size-input');
+        const fontBoldBtn = document.getElementById('font-bold-btn');
+        const fontItalicBtn = document.getElementById('font-italic-btn');
+        const fontUnderlineBtn = document.getElementById('font-underline-btn');
+        const textColorInput = document.getElementById('text-color-input');
+        const drawingControlsContainer = document.getElementById('drawing-controls-container');
+        const brushColorInput = document.getElementById('brush-color');
+        const brushSizeInput = document.getElementById('brush-size');
+        const brushSizeLabel = document.getElementById('brush-size-label');
+        const opacityControlsContainer = document.getElementById('opacity-controls-container');
+        const opacitySlider = document.getElementById('opacity-slider');
+        const opacityValueLabel = document.getElementById('opacity-value-label');
+
+        // Top toolbar page management elements
+        const addNewPageBtn = document.getElementById('add-new-page-btn');
+        const deleteActivePageBtn = document.getElementById('delete-active-page-btn');
+        const togglePageVisibilityBtn = document.getElementById('toggle-page-visibility-btn');
+        const pageSizeToggleBtn = document.getElementById('page-size-toggle-btn');
+        const pageSizeControls = document.getElementById('page-size-controls');
+        const pageWidthInput = document.getElementById('page-width-input');
+        const pageHeightInput = document.getElementById('page-height-input');
+
+        // Top toolbar export elements
+        const exportBtnMain = document.getElementById('export-btn-main');
+        const exportOptionsDropdown = document.getElementById('export-options-dropdown');
+        const exportResolutionSlider = document.getElementById('export-resolution-slider');
+        const exportResolutionValue = document.getElementById('export-resolution-value');
+        const exportActivePagePngBtn = document.getElementById('export-active-page-png-btn');
+        const exportActivePageJpgBtn = document.getElementById('export-active-page-jpg-btn');
+        const exportActivePagePdfBtn = document.getElementById('export-active-page-pdf-btn');
+        const exportAllPagesPngBtn = document.getElementById('export-all-pages-png-btn');
+        const exportAllPagesJpgBtn = document.getElementById('export-all-pages-jpg-btn');
+        const exportAllPagesPdfBtn = document.getElementById('export-all-pages-pdf-btn');
+
+        // Selected Object Actions Toolbar (floats near object)
+        const objectActionsToolbar = document.getElementById('selected-object-toolbar');
+        const lockObjectBtn = document.getElementById('lock-object-btn');
+        const duplicateObjectBtn = document.getElementById('duplicate-object-btn');
+        const deleteObjectBtn = document.getElementById('delete-object-btn');
+        const moreObjectActionsBtn = document.getElementById('more-object-actions-btn');
+        moreObjectActionsBtn.addEventListener('click', (e) => { 
+            const activeObject = canvas.getActiveObject();
+            if(activeObject) {
+                const bound = activeObject.getBoundingRect(true);
+                const center = activeObject.getCenterPoint();
+                const screenPoint = fabric.util.transformPoint(center, canvas.viewportTransform);
+                const canvasRect = canvas.upperCanvasEl.getBoundingClientRect();
+
+                customContextMenu.style.left = `${screenPoint.x + canvasRect.left}px`;
+                customContextMenu.style.top = `${screenPoint.y + canvasRect.top}px`;
+                
+                const isPageTarget = activeObject.isPage === true;
+                customContextMenu.querySelector('[data-action="bringForward"]').style.display = isPageTarget ? 'none' : 'block';
+                customContextMenu.querySelector('[data-action="sendBackward"]').style.display = isPageTarget ? 'none' : 'block';
+                customContextMenu.querySelector('[data-action="bringToFront"]').style.display = isPageTarget ? 'none' : 'block';
+                customContextMenu.querySelector('[data-action="sendToBack"]').style.display = isPageTarget ? 'none' : 'block';
+                
+                const lockButton = customContextMenu.querySelector('[data-action="lock"]');
+                lockButton.innerHTML = activeObject.selectable ? "Bloquear" : "Desbloquear";
+                customContextMenu.dataset.targetIsPage = isPageTarget;
+                customContextMenu.style.display = 'block';
+            }
+             e.stopPropagation();
+        });
+
+
+        // Bottom bar elements
+        const notesBtn = document.getElementById('notes-btn');
+        const objectCoordinatesDisplay = document.getElementById('object-coordinates-display');
+        const zoomSlider = document.getElementById('zoom-slider');
+        const zoomLevelText = document.getElementById('zoom-level');
+        const zoomInBtn = document.getElementById('zoom-in');
+        const zoomOutBtn = document.getElementById('zoom-out');
+        const zoomFitBtn = document.getElementById('zoom-fit');
+        const currentPageIndicator = document.getElementById('current-page-indicator');
+        const totalPagesIndicator = document.getElementById('total-pages-indicator');
+        const prevPageBtn = document.getElementById('prev-page-btn');
+        const nextPageBtn = document.getElementById('next-page-btn');
+
+        // Modals
+        const notesModal = document.getElementById('notes-modal');
+        const closeNotesModalBtn = document.getElementById('close-notes-modal');
+        const notesTextarea = document.getElementById('notes-textarea');
+        const saveNotesBtn = document.getElementById('save-notes-btn');
+        const layersModal = document.getElementById('layers-panel-modal');
+        const closeLayersModalBtn = document.getElementById('close-layers-modal');
+        const layersListContainer = document.getElementById('layers-list-container');
+
+        // Custom Context Menu
+        const customContextMenu = document.getElementById('custom-context-menu');
+
+        // State Variables
+        let uploadedImages = [];
+        let undoStack = [];
+        let redoStack = [];
+        let isApplyingState = false; 
+        let isUpdatingZoomInternally = false; 
+        let lastSavedState = null; 
+        let currentTool = null; 
+
+        let pageRects = []; 
+        let activePageIndex = -1; 
+
+        // Page constants
+        const PAGE_DEFAULT_WIDTH = 800;
+        const PAGE_DEFAULT_HEIGHT = 600;
+        const PAGE_FILL_COLOR = 'white';
+        const PAGE_STROKE_COLOR = '#cccccc';
+        const PAGE_ACTIVE_STROKE_COLOR = '#6a0dad';
+        const PAGE_STROKE_WIDTH = 1; 
+        const PAGE_ACTIVE_STROKE_WIDTH = 2; 
+        const PAGE_CORNER_SIZE = 10; 
+
+        let currentExportMultiplier = parseFloat(exportResolutionSlider.value);
+
+        // SVGs for togglePageVisibilityBtn
+        const svgIconVisible = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5C21.27 7.61 17 4.5 12 4.5zm0 12.5c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"></path></svg>';
+        const svgIconHidden = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 7c2.76 0 5 2.24 5 5 0 .65-.13 1.26-.36 1.83l2.92 2.92c1.51-1.26 2.7-2.89 3.44-4.75C21.27 7.61 17 4.5 12 4.5c-1.77 0-3.39.53-4.79 1.4L8.9 7.57A4.973 4.973 0 0112 7zm-1.05 9.05L13.87 13.1c.04-.08.07-.16.1-.24.08-.24.13-.48.13-.76 0-1.66-1.34-3-3-3-.28 0-.55.05-.79.13l-1.97-1.97C7.61 5.34 9.69 4.5 12 4.5c5 0 9.27 3.11 11 7.5-.75 1.87-1.96 3.52-3.49 4.8l-2.06-2.06c.07-.13.14-.26.2-.4.1-.24.15-.48.15-.74zm-5.07-5.07l1.56 1.56c-.05.16-.09.33-.09.51 0 1.66 1.34 3 3 3 .18 0 .35-.04.51-.09l1.56 1.56C13.05 14.74 12.55 15 12 15c-1.66 0-3-1.34-3-3 0-.55.16-1.05.42-1.51L7.88 8.98zm-3.83-3.83L2.27 3.88 1 5.15l2.76 2.76C2.06 9.18 1.21 10.54 1 12c1.73 4.39 6 7.5 11 7.5 1.55 0 3.03-.3 4.38-.84l2.52 2.52 1.27-1.27L3.08 4.12z"></path></svg>';
+
+
+        // --- Initialization ---
+        function init() {
+            if (pageRects.length === 0) {
+                addPage({}, true); 
+                setActivePage(0);   
+            } else {
+                setActivePage(activePageIndex >= 0 && activePageIndex < pageRects.length ? activePageIndex : 0);
+            }
+            loadNotes();
+            updateSidebarImageList();
+            saveCanvasState(true); 
+            updateUndoRedoButtons();
+            hideAllContextualToolbars();
+            updateObjectCoordinateDisplay();
+            updatePageControlsState();
+        }
+
+        // --- Page Management ---
+        function getActivePage() {
+            if (activePageIndex >= 0 && activePageIndex < pageRects.length) {
+                return pageRects[activePageIndex];
+            }
+            return null;
+        }
+
+        function setActivePage(index, centerView = true) {
+            if (isApplyingState && !centerView) return; 
+
+            const currentZoom = canvas.getZoom() || 1;
+            const safeZoomForDivision = (currentZoom > 0.01) ? currentZoom : 0.01;
+
+            if (activePageIndex !== -1 && activePageIndex < pageRects.length && pageRects[activePageIndex]) {
+                const oldActivePage = pageRects[activePageIndex];
+                oldActivePage.set({
+                    stroke: PAGE_STROKE_COLOR,
+                    strokeWidth: PAGE_STROKE_WIDTH / safeZoomForDivision,
+                });
+            }
+
+            if (index < 0 || index >= pageRects.length) {
+                activePageIndex = -1;
+                updatePageControlsState();
+                canvas.discardActiveObject().renderAll();
+                return;
+            }
+
+            activePageIndex = index;
+            const newActivePage = pageRects[activePageIndex];
+
+            newActivePage.set({
+                stroke: PAGE_ACTIVE_STROKE_COLOR,
+                strokeWidth: PAGE_ACTIVE_STROKE_WIDTH / safeZoomForDivision,
+            });
+             newActivePage.cornerSizeBase = newActivePage.cornerSizeBase || PAGE_CORNER_SIZE;
+             newActivePage.cornerSize = newActivePage.cornerSizeBase / safeZoomForDivision;
+
+            if (canvas.getActiveObject() !== newActivePage) {
+                canvas.discardActiveObject().setActiveObject(newActivePage);
+            }
+
+            if (newActivePage.selectable && newActivePage.hasControls) {
+                newActivePage.setControlsVisibility({mtr:false, mt:false, mb:false, ml:false, mr:false, tl:true, tr:true, bl:true, br:true});
+            } else {
+                newActivePage.setControlsVisibility({mtr:false, mt:false, mb:false, ml:false, mr:false, tl:false, tr:false, bl:false, br:false});
+            }
+            newActivePage.borderColor = PAGE_ACTIVE_STROKE_COLOR; 
+
+            if (centerView) {
+                centerCanvasOnPage(newActivePage);
+            }
+
+            updatePageControlsState();
+            updateObjectCoordinateDisplay();
+            
+            togglePageVisibilityBtn.innerHTML = newActivePage.visible ? svgIconVisible : svgIconHidden;
+            togglePageVisibilityBtn.classList.toggle('active', newActivePage.visible);
+
+
+            if (!centerView) canvas.requestRenderAll(); 
+        }
+
+        function addPage(options = {}, isInitialLoadOrLoadProject = false) {
+            if (!isInitialLoadOrLoadProject && pageRects.length >= MAX_PAGES) {
+                alert(`Solo puedes tener un máximo de ${MAX_PAGES} páginas.`);
+                return null;
+            }
+
+            const newPageIndex = pageRects.length;
+            const currentZoom = canvas.getZoom() || 1;
+            const safeZoomForDivision = (currentZoom > 0.01) ? currentZoom : 0.01;
+            const pageIsLocked = options.selectable === false;
+
+            let initialLeft = (VIRTUAL_CANVAS_SIZE - (options.width || PAGE_DEFAULT_WIDTH)) / 2;
+            let initialTop = (VIRTUAL_CANVAS_SIZE - (options.height || PAGE_DEFAULT_HEIGHT)) / 2;
+
+            if (pageRects.length > 0 && options.left === undefined && !isInitialLoadOrLoadProject) {
+                const lastPage = pageRects[pageRects.length - 1];
+                const spacing = (lastPage.width * (lastPage.scaleX || 1)) * 0.1 + (50 / safeZoomForDivision) ;
+                initialLeft = lastPage.left + (lastPage.width * (lastPage.scaleX || 1)) + spacing;
+                initialTop = lastPage.top;
+            }
+
+            if (options.left === undefined) options.left = initialLeft;
+            if (options.top === undefined) options.top = initialTop;
+
+            const newPage = new fabric.Rect({
+                left: options.left,
+                top: options.top,
+                width: options.width || PAGE_DEFAULT_WIDTH,
+                height: options.height || PAGE_DEFAULT_HEIGHT,
+                scaleX: options.scaleX || 1,
+                scaleY: options.scaleY || 1,
+                fill: options.fill || PAGE_FILL_COLOR,
+                stroke: PAGE_STROKE_COLOR,
+                strokeWidth: PAGE_STROKE_WIDTH / safeZoomForDivision,
+                shadow: options.shadow || 'rgba(0,0,0,0.1) 2px 2px 8px',
+                selectable: options.selectable !== undefined ? options.selectable : true,
+                evented: true, 
+                hasControls: pageIsLocked ? false : (options.hasControls !== undefined ? options.hasControls : true),
+                borderColor: PAGE_ACTIVE_STROKE_COLOR, 
+                cornerColor: PAGE_ACTIVE_STROKE_COLOR,
+                cornerStyle: 'circle',
+                cornerSizeBase: options.cornerSizeBase || PAGE_CORNER_SIZE,
+                cornerSize: (options.cornerSizeBase || PAGE_CORNER_SIZE) / safeZoomForDivision,
+                transparentCorners: false,
+                name: options.name || `__pageRect_${Date.now()}_${newPageIndex}`,
+                isPage: true,
+                visible: options.visible !== undefined ? options.visible : true,
+            });
+
+            if (pageIsLocked) {
+                newPage.setControlsVisibility({ mtr: false, mt: false, mb: false, ml: false, mr: false, tl: false, tr: false, bl: false, br: false });
+            } else {
+                newPage.setControlsVisibility({mtr:false, mt:false, mb:false, ml:false, mr:false, tl:true, tr:true, bl:true, br:true});
+            }
+
+            pageRects.push(newPage);
+            canvas.add(newPage);
+            canvas.sendToBack(newPage);
+
+            if (!isInitialLoadOrLoadProject) {
+                 setActivePage(newPageIndex);
+                 debouncedSaveState();
+            }
+            return newPage;
+        }
+
+        function deletePage(pageToDelete) {
+             if (pageToDelete && pageToDelete.isPage) {
+                const pageIndexToDelete = pageRects.indexOf(pageToDelete);
+                if (pageIndexToDelete !== -1) {
+                    const pageNameToDelete = pageToDelete.name; 
+
+                    canvas.getObjects().forEach(obj => {
+                        if (obj.hostPageId === pageNameToDelete && obj !== pageToDelete) {
+                           canvas.remove(obj);
+                        }
+                    });
+
+                    canvas.remove(pageToDelete);
+                    pageRects.splice(pageIndexToDelete, 1);
+
+                    if (pageRects.length > 0) {
+                        setActivePage(Math.max(0, pageIndexToDelete - 1)); 
+                    } else {
+                        activePageIndex = -1; 
+                        setActivePage(-1);    
+                    }
+                    debouncedSaveState();
+                }
+            }
+        }
+
+        function updatePageControlsState() {
+            totalPagesIndicator.textContent = pageRects.length;
+            currentPageIndicator.textContent = pageRects.length > 0 && activePageIndex !== -1 ? activePageIndex + 1 : 0;
+            prevPageBtn.disabled = activePageIndex <= 0;
+            nextPageBtn.disabled = activePageIndex >= pageRects.length - 1 || pageRects.length === 0;
+            deleteActivePageBtn.disabled = pageRects.length === 0 || activePageIndex === -1;
+            
+            addNewPageBtn.disabled = pageRects.length >= MAX_PAGES;
+
+
+            const activeP = getActivePage();
+            if (activeP) {
+                pageWidthInput.value = Math.round(activeP.getScaledWidth());
+                pageHeightInput.value = Math.round(activeP.getScaledHeight());
+                togglePageVisibilityBtn.innerHTML = activeP.visible ? svgIconVisible : svgIconHidden;
+                togglePageVisibilityBtn.classList.toggle('active', activeP.visible);
+                if(pageSizeControls.style.display === 'flex'){
+                    pageWidthInput.disabled = !activeP.selectable; 
+                    pageHeightInput.disabled = !activeP.selectable;
+                }
+            } else {
+                pageWidthInput.value = PAGE_DEFAULT_WIDTH;
+                pageHeightInput.value = PAGE_DEFAULT_HEIGHT;
+                togglePageVisibilityBtn.innerHTML = svgIconVisible; 
+                togglePageVisibilityBtn.classList.remove('active');
+                if (pageSizeControls.style.display === 'flex') {
+                    pageSizeControls.style.display = 'none';
+                }
+            }
+        }
+
+        // --- Zoom & Pan ---
+        function centerCanvasOnPage(pageToCenter, customZoom) {
+            if (isUpdatingZoomInternally) return;
+            isUpdatingZoomInternally = true;
+
+            const targetPage = pageToCenter || getActivePage();
+            if (!targetPage || !targetPage.width || !targetPage.height || !targetPage.visible) {
+                const fallbackZoom = pageRects.some(p => p.visible) ? 0.15 : 0.05;
+                canvas.setZoom(fallbackZoom);
+                canvas.viewportTransform[4] = (canvasArea.clientWidth - VIRTUAL_CANVAS_SIZE * canvas.getZoom()) / 2;
+                canvas.viewportTransform[5] = (canvasArea.clientHeight - VIRTUAL_CANVAS_SIZE * canvas.getZoom()) / 2;
+                canvas.requestRenderAll();
+                requestAnimationFrame(() => { 
+                    isUpdatingZoomInternally = false;
+                    updateZoomUI(); 
+                });
+                return;
+            }
+
+            const canvasAreaWidth = canvasArea.clientWidth;
+            const canvasAreaHeight = canvasArea.clientHeight;
+            const padding = 60; 
+
+            let newZoom;
+            if (customZoom) {
+                newZoom = customZoom;
+            } else {
+                const pageUnscaledWidth = targetPage.width * targetPage.scaleX;
+                const pageUnscaledHeight = targetPage.height * targetPage.scaleY;
+                const zoomX = pageUnscaledWidth > 0 ? (canvasAreaWidth - padding * 2) / pageUnscaledWidth : 1;
+                const zoomY = pageUnscaledHeight > 0 ? (canvasAreaHeight - padding * 2) / pageUnscaledHeight : 1;
+                newZoom = Math.min(zoomX, zoomY);
+                newZoom = Math.max(0.05, Math.min(newZoom, 5)); 
+            }
+
+            canvas.zoomToPoint(new fabric.Point(targetPage.getCenterPoint().x, targetPage.getCenterPoint().y), newZoom);
+            
+            requestAnimationFrame(() => { 
+                isUpdatingZoomInternally = false;
+                updateZoomUI(); 
+            });
+        }
+
+        function updateZoomUI() {
+            if (isUpdatingZoomInternally) return;
+
+            let currentCanvasZoom = canvas.getZoom();
+
+            if (typeof currentCanvasZoom !== 'number' || isNaN(currentCanvasZoom)) {
+                currentCanvasZoom = 1; 
+            }
+            const safeZoomForDivision = (currentCanvasZoom > 0.01) ? currentCanvasZoom : 0.01;
+            
+            if (zoomLevelText) {
+                 zoomLevelText.textContent = `${Math.round(currentCanvasZoom * 100)}%`;
+            }
+
+            if (zoomSlider) {
+                let sliderValue = Math.round(currentCanvasZoom * 100);
+                const minSlider = parseInt(zoomSlider.min, 10);
+                const maxSlider = parseInt(zoomSlider.max, 10);
+
+                if (!isNaN(minSlider)) sliderValue = Math.max(minSlider, sliderValue);
+                if (!isNaN(maxSlider)) sliderValue = Math.min(maxSlider, sliderValue);
+
+                if (document.activeElement !== zoomSlider) {
+                    zoomSlider.value = sliderValue;
+                }
+            }
+            
+            debouncedUpdateObjectActionsToolbar();
+
+            pageRects.forEach(p => {
+                const isActivePage = p === getActivePage();
+                const baseCornerSize = p.cornerSizeBase || PAGE_CORNER_SIZE;
+                let strokeW = (isActivePage ? PAGE_ACTIVE_STROKE_WIDTH : PAGE_STROKE_WIDTH);
+                
+                p.set({
+                    strokeWidth: strokeW / safeZoomForDivision,
+                    cornerSize: baseCornerSize / safeZoomForDivision
+                });
+
+                if (p.isPage) {
+                    if (p.selectable && p.hasControls) {
+                        p.setControlsVisibility({mtr:false, mt:false, mb:false, ml:false, mr:false, tl:true, tr:true, bl:true, br:true});
+                    } else {
+                        p.setControlsVisibility({mtr:false, mt:false, mb:false, ml:false, mr:false, tl:false, tr:false, bl:false, br:false});
+                    }
+                }
+            });
+            canvas.requestRenderAll();
+        }
+        
+        function setCanvasZoomLevel(zoom, point) {
+            const newZoom = Math.max(0.05, Math.min(zoom, 5)); 
+            let zoomPoint = point ? new fabric.Point(point.x, point.y) : canvas.getVpCenter();
+            const activeP = getActivePage();
+            if (!point && activeP && activeP.visible) { 
+                zoomPoint = activeP.getCenterPoint();
+            }
+            canvas.zoomToPoint(zoomPoint, newZoom);
+        }
+
+        zoomSlider.addEventListener('input', function() { setCanvasZoomLevel(parseInt(this.value) / 100); });
+        zoomInBtn.addEventListener('click', function() { setCanvasZoomLevel(canvas.getZoom() * 1.1); });
+        zoomOutBtn.addEventListener('click', function() { setCanvasZoomLevel(canvas.getZoom() / 1.1); });
+        zoomFitBtn.addEventListener('click', function() {
+            const activeP = getActivePage();
+            if (activeP && activeP.visible) {
+                centerCanvasOnPage(activeP);
+            } else {
+                const firstVisiblePage = pageRects.find(p => p.visible);
+                if (firstVisiblePage) {
+                    centerCanvasOnPage(firstVisiblePage);
+                } else { 
+                    let items = canvas.getObjects().filter(obj => obj.visible && !obj.isPage);
+                    if (items.length === 0) { centerCanvasOnPage(null); return; }
+                    
+                    canvas.setViewportTransform([1,0,0,1,0,0]);
+                    var group = new fabric.Group(items, { canvas: canvas });
+                    const bound = group.getBoundingRect(true);
+                    group.destroy();
+
+                    if (bound.width === 0 || bound.height === 0) { centerCanvasOnPage(null); return;}
+
+                    const areaWidth = canvasArea.clientWidth - 60;
+                    const areaHeight = canvasArea.clientHeight - 60;
+                    const scaleX = areaWidth / bound.width;
+                    const scaleY = areaHeight / bound.height;
+                    const newZoom = Math.min(scaleX, scaleY, 5); 
+                    canvas.zoomToPoint(new fabric.Point(bound.left + bound.width / 2, bound.top + bound.height / 2), newZoom);
+                }
+            }
+        });
+
+        canvas.on('mouse:wheel', function(opt) {
+            const delta = opt.e.deltaY;
+            let zoom = canvas.getZoom();
+            zoom *= 0.999 ** delta;
+            setCanvasZoomLevel(zoom, { x: opt.e.offsetX, y: opt.e.offsetY });
+            opt.e.preventDefault();
+            opt.e.stopPropagation();
+        });
+        canvas.on('mouse:down', function(options) {
+            if (options.button !== 3 && customContextMenu.style.display === 'block' && !customContextMenu.contains(options.e.target)) {
+                customContextMenu.style.display = 'none';
+            }
+            const evt = options.e;
+            if (evt.altKey === true || evt.buttons === 4) { 
+                this.isDragging = true;
+                this.selection = false;
+                this.lastPosX = evt.clientX;
+                this.lastPosY = evt.clientY;
+                canvas.setCursor('grabbing');
+                if (options.target) { canvas.discardActiveObject().renderAll(); } 
+            }
+        });
+        canvas.on('mouse:move', function(opt) {
+            if (this.isDragging) { 
+                const e = opt.e;
+                const vpt = this.viewportTransform;
+                vpt[4] += e.clientX - this.lastPosX;
+                vpt[5] += e.clientY - this.lastPosY;
+                this.requestRenderAll();
+                this.lastPosX = e.clientX;
+                this.lastPosY = e.clientY;
+            }
+        });
+        canvas.on('mouse:up', function (options) {
+            if (this.isDragging) {
+                this.setViewportTransform(this.viewportTransform);
+                this.isDragging = false;
+                this.selection = true;
+                canvas.setCursor('default');
+            }
+            if (options.button === 3) {
+                customContextMenu.style.display = 'none';
+                let targetForContextMenu = options.target;
+
+                if (targetForContextMenu) {
+                    if (canvas.getActiveObject() !== targetForContextMenu) {
+                        canvas.setActiveObject(targetForContextMenu);
+                         if (targetForContextMenu.isPage) { 
+                            const pageIndex = pageRects.indexOf(targetForContextMenu);
+                            if (pageIndex !== -1 && pageIndex !== activePageIndex) {
+                                setActivePage(pageIndex, false); 
+                            }
+                        }
+                    } else if (targetForContextMenu.isPage && activePageIndex !== pageRects.indexOf(targetForContextMenu)) {
+                        const pageIndex = pageRects.indexOf(targetForContextMenu);
+                        if (pageIndex !== -1) setActivePage(pageIndex, false);
+                    }
+                    canvas.renderAll(); 
+
+                    const isPageTarget = targetForContextMenu.isPage === true;
+                    customContextMenu.querySelector('[data-action="bringForward"]').style.display = isPageTarget ? 'none' : 'block';
+                    customContextMenu.querySelector('[data-action="sendBackward"]').style.display = isPageTarget ? 'none' : 'block';
+                    customContextMenu.querySelector('[data-action="bringToFront"]').style.display = isPageTarget ? 'none' : 'block';
+                    customContextMenu.querySelector('[data-action="sendToBack"]').style.display = isPageTarget ? 'none' : 'block';
+                    
+                    const lockButton = customContextMenu.querySelector('[data-action="lock"]');
+                    lockButton.innerHTML = targetForContextMenu.selectable ? "Bloquear" : "Desbloquear";
+                    
+                    customContextMenu.style.left = `${options.e.clientX}px`;
+                    customContextMenu.style.top = `${options.e.clientY}px`;
+                    customContextMenu.style.display = 'block';
+                    customContextMenu.dataset.targetIsPage = isPageTarget;
+                }
+                options.e.preventDefault(); options.e.stopPropagation();
+            } else { 
+                if (customContextMenu.style.display === 'block' && !customContextMenu.contains(options.e.target)) {
+                     customContextMenu.style.display = 'none';
+                }
+            }
+        });
+        canvas.on('viewport:transformed', updateZoomUI); 
+
+        // --- Undo/Redo ---
+        const propsToSaveUndo = ['name', '_customId', 'id', 'selectable', 'evented', 'hasControls', 'hasBorders', 'opacity', 'isPage', 'visible', 'cornerSizeBase', 'shadow', 'fill', 'stroke', 'strokeWidth', 'scaleX', 'scaleY', 'left', 'top', 'width', 'height', 'angle', 'flipX', 'flipY', 'skewX', 'skewY', 'fontFamily', 'fontSize', 'fontWeight', 'fontStyle', 'underline', 'textAlign', 'text', 'path', 'clipPath', 'hostPageId']; 
+
+        function saveCanvasState(force = false) {
+            if (isApplyingState && !force) return;
+
+            const currentStateData = {
+                canvasState: canvas.toDatalessJSON(propsToSaveUndo),
+                pagesState: pageRects.map(p => p.toObject(propsToSaveUndo)), 
+                activePageIndex: activePageIndex,
+            };
+            const currentStateString = JSON.stringify(currentStateData);
+
+            if (!force && lastSavedState && lastSavedState === currentStateString) return;
+
+            undoStack.push(currentStateData);
+            lastSavedState = currentStateString;
+            redoStack = [];
+            updateUndoRedoButtons();
+        }
+        const debouncedSaveState = debounce(saveCanvasState, 300);
+
+        function applyState(stateToApply) {
+            isApplyingState = true;
+            canvas.clear();
+            pageRects = []; 
+
+            canvas.loadFromJSON(stateToApply.canvasState, () => {
+                const currentZoom = canvas.getZoom() || 1; 
+                const safeZoomForDivision = (currentZoom > 0.01) ? currentZoom : 0.01;
+                const actualCanvasPages = [];
+
+                canvas.getObjects().forEach(obj => {
+                    if (obj.isPage) {
+                        actualCanvasPages.push(obj);
+                        const savedPageState = stateToApply.pagesState?.find(ps => ps.name === obj.name);
+                        if (savedPageState) {
+                            Object.keys(savedPageState).forEach(key => {
+                                 if (propsToSaveUndo.includes(key)) {
+                                    obj[key] = savedPageState[key];
+                                }
+                            });
+                        }
+                        obj.cornerSizeBase = obj.cornerSizeBase || PAGE_CORNER_SIZE;
+                        obj.cornerSize = obj.cornerSizeBase / safeZoomForDivision;
+                        obj.evented = true; 
+                         if (obj.selectable) {
+                            obj.setControlsVisibility({mtr:false, mt:false, mb:false, ml:false, mr:false, tl:true, tr:true, bl:true, br:true});
+                            obj.hasControls = true;
+                        } else {
+                            obj.setControlsVisibility({mtr:false, mt:false, mb:false, ml:false, mr:false, tl:false, tr:false, bl:false, br:false});
+                            obj.hasControls = false;
+                        }
+                        canvas.sendToBack(obj);
+                    } else {
+                        obj.setControlsVisibility({ mtr: true, mt: false, mb: false, ml: false, mr: false });
+                    }
+                });
+                pageRects = actualCanvasPages.sort((a,b) => (a.name > b.name) ? 1 : ((b.name > a.name) ? -1 : 0));
+
+
+                const savedActiveIndex = stateToApply.activePageIndex;
+                if (savedActiveIndex !== undefined && savedActiveIndex >= 0 && savedActiveIndex < pageRects.length) {
+                    setActivePage(savedActiveIndex, true); 
+                } else if (pageRects.length > 0) {
+                    setActivePage(0, true);
+                } else {
+                    setActivePage(-1, true);
+                }
+                
+                updateLayersPanel();
+                updateObjectCoordinateDisplay();
+                updateTextControlsFromSelection();
+                updateOpacityControlFromSelection();
+                updatePageControlsState();
+                
+                isApplyingState = false;
+                lastSavedState = JSON.stringify(stateToApply); 
+                canvas.renderAll();
+            });
+            updateUndoRedoButtons();
+        }
+        undoBtn.addEventListener('click', () => { if (undoStack.length > 1) { redoStack.push(undoStack.pop()); applyState(undoStack[undoStack.length - 1]); } });
+        redoBtn.addEventListener('click', () => { if (redoStack.length > 0) { const stateToApply = redoStack.pop(); undoStack.push(stateToApply); applyState(stateToApply); } });
+        function updateUndoRedoButtons() { undoBtn.disabled = undoStack.length <= 1; redoBtn.disabled = redoStack.length === 0; }
+
+
+        // --- Sidebar Functionality (Image Upload, Tabs, Presets) ---
+        triggerImageUploadBtn.addEventListener('click', () => imageUploadInput.click());
+        imageUploadInput.addEventListener('change', handleImageUpload);
+        document.addEventListener('paste', handleImagePaste);
+
+        function handleImageUpload(event) { const files = event.target.files; if (!files) return; Array.from(files).forEach(file => processImageFile(file)); imageUploadInput.value = ''; }
+        function handleImagePaste(event) { const items = (event.clipboardData || event.originalEvent.clipboardData).items; for (let item of items) { if (item.type.indexOf("image") !== -1) { const file = item.getAsFile(); processImageFile(file, "pasted_"); event.preventDefault(); break; } } }
+        function processImageFile(file, baseName = "") {
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                const defaultId = (file.name || baseName + Date.now()).replace(/\.[^/.]+$/, "");
+                const identifier = prompt(`Ingresa un identificador para "${file.name || defaultId}":`, defaultId);
+                if (identifier && identifier.trim() !== "") {
+                    const newImage = { id: identifier.trim(), name: file.name || identifier.trim() + ".png", src: e.target.result };
+                    if (uploadedImages.some(img => img.id === newImage.id)) {
+                        alert(`Ya existe una imagen con el ID "${newImage.id}". Por favor, elige otro.`);
+                        return;
+                    }
+                    uploadedImages.push(newImage);
+                    updateSidebarImageList();
+                }
+            };
+            reader.readAsDataURL(file);
+        }
+        imageSearchInput.addEventListener('input', () => updateSidebarImageList());
+        function updateSidebarImageList() {
+            const searchTerm = imageSearchInput.value.toLowerCase();
+            sidebarImageContainer.innerHTML = '';
+            const filteredImages = uploadedImages.filter(img => img.id.toLowerCase().includes(searchTerm));
+            filteredImages.forEach(imgData => {
+                const itemDiv = document.createElement('div');
+                itemDiv.className = 'sidebar-image-item';
+                itemDiv.draggable = true;
+                itemDiv.dataset.imgSrc = imgData.src;
+                itemDiv.dataset.imgId = imgData.id; 
+                const imgEl = document.createElement('img'); imgEl.src = imgData.src; imgEl.alt = imgData.name;
+                const nameSpan = document.createElement('span'); nameSpan.className = 'img-name'; nameSpan.textContent = imgData.id;
+                itemDiv.appendChild(imgEl); itemDiv.appendChild(nameSpan);
+                sidebarImageContainer.appendChild(itemDiv);
+                itemDiv.addEventListener('dragstart', (e) => {
+                    e.dataTransfer.setData('application/json', JSON.stringify({ imageSrc: imgData.src, imageId: imgData.id }));
+                });
+            });
+        }
+        sidebarTabs.forEach(tab => {
+            tab.addEventListener('click', () => {
+                sidebarTabs.forEach(t => t.classList.remove('active'));
+                sidebarPanels.forEach(p => p.classList.remove('active'));
+                tab.classList.add('active');
+                const targetPanelId = tab.dataset.tabContent;
+                if (targetPanelId) {
+                    const targetPanel = document.getElementById(targetPanelId);
+                    if (targetPanel) targetPanel.classList.add('active');
+                }
+            });
+        });
+        presetTextButtons.forEach(button => {
+            button.addEventListener('dragstart', (e) => {
+                e.dataTransfer.setData('application/json', JSON.stringify({ presetTextType: e.target.dataset.textType }));
+            });
+             button.addEventListener('click', () => { 
+                const activeP = getActivePage();
+                const dropCoords = activeP
+                    ? { x: activeP.left + (activeP.getScaledWidth()) / 2, y: activeP.top + (activeP.getScaledHeight()) / 2 }
+                    : { x: canvas.getVpCenter().x, y: canvas.getVpCenter().y }; 
+                addPresetTextToCanvas(button.dataset.textType, dropCoords);
+            });
+        });
+
+        // --- Drag & Drop onto Canvas ---
+        canvasArea.addEventListener('dragover', (e) => e.preventDefault());
+        canvasArea.addEventListener('drop', (e) => {
+            e.preventDefault();
+            const pointer = canvas.getPointer(e);
+            let data;
+            try { data = JSON.parse(e.dataTransfer.getData('application/json')); } catch (err) { return; }
+
+            if (data.imageSrc && data.imageId) { 
+                fabric.Image.fromURL(data.imageSrc, (img) => {
+                    img.set({
+                        left: pointer.x, top: pointer.y, originX: 'center', originY: 'center',
+                        name: `image_${data.imageId}`, 
+                        _customId: data.imageId
+                    });
+                    const activePageForObject = getActivePage();
+                    if (activePageForObject) {
+                        img.hostPageId = activePageForObject.name;
+                    }
+                    img.scaleToWidth(Math.min(150 / (canvas.getZoom() || 1), PAGE_DEFAULT_WIDTH * 0.8)); 
+                    img.setControlsVisibility({ mtr: true, mt: false, mb: false, ml: false, mr: false });
+                    canvas.add(img).setActiveObject(img).renderAll();
+                    debouncedSaveState();
+                }, { crossOrigin: 'anonymous' });
+            } else if (data.presetTextType) { 
+                addPresetTextToCanvas(data.presetTextType, pointer);
+            }
+        });
+
+        // --- Object Actions Toolbar (Floating) ---
+        const debouncedUpdateObjectActionsToolbar = debounce(updateObjectActionsToolbar, 50);
+        function updateObjectActionsToolbar() {
+            if (!objectActionsToolbar) return;
+            const activeObject = canvas.getActiveObject();
+
+            if (activeObject && !activeObject.isPage && !activeObject.isEditing && activeObject.type !== 'activeSelection') {
+                const objBoundsInCanvasSpace = activeObject.getBoundingRect();
+                const transformedTopLeft = fabric.util.transformPoint(
+                    new fabric.Point(objBoundsInCanvasSpace.left, objBoundsInCanvasSpace.top),
+                    canvas.viewportTransform
+                );
+                const transformedWidth = objBoundsInCanvasSpace.width * canvas.getZoom();
+                const canvasAreaRect = canvasArea.getBoundingClientRect();
+
+                let toolbarTop = transformedTopLeft.y + canvasAreaRect.top - objectActionsToolbar.offsetHeight - 8;
+                let toolbarLeft = transformedTopLeft.x + canvasAreaRect.left + (transformedWidth / 2);
+
+                toolbarTop = Math.max(canvasAreaRect.top + 5, Math.min(toolbarTop, canvasAreaRect.bottom - objectActionsToolbar.offsetHeight - 5));
+                toolbarLeft = Math.max(
+                    canvasAreaRect.left + (objectActionsToolbar.offsetWidth / 2) + 5,
+                    Math.min(toolbarLeft, canvasAreaRect.left + canvasArea.clientWidth - (objectActionsToolbar.offsetWidth / 2) - 5)
+                );
+
+                objectActionsToolbar.style.top = `${toolbarTop}px`;
+                objectActionsToolbar.style.left = `${toolbarLeft}px`;
+                objectActionsToolbar.style.display = 'flex';
+
+                const isLocked = !activeObject.selectable && !activeObject.evented;
+                lockObjectBtn.innerHTML = isLocked
+                    ? '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 17c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm6-9h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zM9 6c0-1.66 1.34-3 3-3s3 1.34 3 3v2H9V6z"></path></svg>' 
+                    : '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-6 9c-1.1 0-2-.9-2-2s-.9-2 2-2 2 .9 2 2-.9 2-2 2zm3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1s3.1 1.39 3.1 3.1v2z"></path></svg>'; 
+            } else {
+                objectActionsToolbar.style.display = 'none';
+            }
+        }
+        if (objectActionsToolbar) {
+            lockObjectBtn.addEventListener('click', () => { const activeObject = canvas.getActiveObject(); if (!activeObject || activeObject.isPage) return; toggleLockState(activeObject); updateObjectActionsToolbar(); });
+            duplicateObjectBtn.addEventListener('click', () => { const activeObject = canvas.getActiveObject(); if (!activeObject || activeObject.isPage) return; duplicateObject(activeObject); });
+            deleteObjectBtn.addEventListener('click', () => { const activeObject = canvas.getActiveObject(); if (!activeObject || activeObject.isPage) return; deleteObject(activeObject); objectActionsToolbar.style.display = 'none'; });
+        }
+
+        // --- Canvas Event Handlers & Object Manipulation ---
+        canvas.on({
+            'selection:created': handleSelectionChange,
+            'selection:updated': handleSelectionChange,
+            'selection:cleared': () => { objectActionsToolbar.style.display = 'none'; hideAllContextualToolbars(); customContextMenu.style.display = 'none'; updateObjectCoordinateDisplay(); },
+            'object:moving': (e) => { debouncedUpdateObjectActionsToolbar(); if (e.target && !e.target.isPage) updateObjectCoordinateDisplay(); },
+            'object:scaling': (e) => {
+                debouncedUpdateObjectActionsToolbar();
+                if (e.target && !e.target.isPage) updateObjectCoordinateDisplay();
+                if (e.target && e.target.isPage && e.target === getActivePage()) { 
+                    pageWidthInput.value = Math.round(e.target.getScaledWidth());
+                    pageHeightInput.value = Math.round(e.target.getScaledHeight());
+                }
+            },
+            'object:rotating': debouncedUpdateObjectActionsToolbar,
+            'object:modified': (e) => { 
+                debouncedUpdateObjectActionsToolbar();
+                updateObjectCoordinateDisplay();
+                if (e.target && e.target.isPage) {
+                    canvas.sendToBack(e.target);
+                    if(e.target === getActivePage()){
+                        pageWidthInput.value = Math.round(e.target.getScaledWidth());
+                        pageHeightInput.value = Math.round(e.target.getScaledHeight());
+                    }
+                }
+                if (!isApplyingState) debouncedSaveState();
+            },
+            'text:editing:entered': () => { objectActionsToolbar.style.display = 'none'; customContextMenu.style.display = 'none'; },
+            'text:editing:exited': debouncedUpdateObjectActionsToolbar,
+            'path:created': (e) => { 
+                if (e.path) { 
+                    const activePageForObject = getActivePage();
+                    if (activePageForObject) {
+                        e.path.hostPageId = activePageForObject.name;
+                    }
+                }
+                if(!isApplyingState) debouncedSaveState();
+            } 
+        });
+
+        function handleSelectionChange(e) {
+            const selected = e.selected;
+            if (selected && selected.length === 1 && selected[0].isPage) {
+                const selectedPageIndex = pageRects.indexOf(selected[0]);
+                if (selectedPageIndex !== -1 && selectedPageIndex !== activePageIndex) {
+                    setActivePage(selectedPageIndex, false); 
+                }
+            }
+            debouncedUpdateObjectActionsToolbar();
+            updateOpacityControlFromSelection();
+            updateTextControlsFromSelection();
+            updateObjectCoordinateDisplay();
+        }
+
+        window.addEventListener('resize', () => {
+            debouncedUpdateObjectActionsToolbar();
+            const activeP = getActivePage();
+            if (activeP && activeP.visible) centerCanvasOnPage(activeP); 
+            else centerCanvasOnPage(pageRects.find(p => p.visible) || null); 
+        });
+
+        // --- Contextual Toolbars Logic ---
+        function hideAllContextualToolbars() {
+            [drawingControlsContainer, textControlsContainer, opacityControlsContainer].forEach(el => el.classList.remove('active'));
+            if (currentTool === 'draw') drawingModeBtn.classList.remove('active-tool');
+            if (currentTool === 'text') addTextBtn.classList.remove('active-tool');
+            canvas.isDrawingMode = false;
+            currentTool = null;
+        }
+        function setActiveTool(toolName, buttonElement, controlsContainerArray) {
+            hideAllContextualToolbars();
+            currentTool = toolName;
+            if (buttonElement) buttonElement.classList.add('active-tool');
+            if (controlsContainerArray) {
+                controlsContainerArray.forEach(container => {
+                    if(container) container.classList.add('active');
+                });
+            }
+            if (toolName === 'draw') canvas.isDrawingMode = true;
+             updateOpacityControlFromSelection(); 
+        }
+
+        // Opacity Controls
+        opacitySlider.addEventListener('input', (e) => {
+            const activeObject = canvas.getActiveObject();
+            if (activeObject && !activeObject.isPage) { 
+                const opacityValue = parseInt(e.target.value) / 100;
+                activeObject.set('opacity', opacityValue);
+                opacityValueLabel.textContent = `${e.target.value}%`;
+                canvas.renderAll();
+                debouncedSaveState();
+            }
+        });
+        function updateOpacityControlFromSelection() {
+            const activeObject = canvas.getActiveObject();
+            if (activeObject && !activeObject.isPage && activeObject.type !== 'activeSelection') {
+                const currentOpacity = activeObject.opacity === undefined ? 1 : activeObject.opacity;
+                opacitySlider.value = Math.round(currentOpacity * 100);
+                opacityValueLabel.textContent = `${opacitySlider.value}%`;
+                if (currentTool !== 'draw' && currentTool !== 'text') { 
+                     opacityControlsContainer.classList.add('active');
+                }
+            } else {
+                if (currentTool !== 'draw' && currentTool !== 'text') {
+                     opacityControlsContainer.classList.remove('active');
+                }
+            }
+        }
+
+        // Text Tool
+        addTextBtn.addEventListener('click', () => {
+            if (currentTool === 'text') { hideAllContextualToolbars(); return; }
+            setActiveTool('text', addTextBtn, [textControlsContainer, opacityControlsContainer]);
+            const activeP = getActivePage();
+            const defaultCoords = activeP
+                ? {left: activeP.left + (activeP.getScaledWidth() / 2), top: activeP.top + (activeP.getScaledHeight() / 2)}
+                : {left: canvas.getVpCenter().x, top: canvas.getVpCenter().y };
+            const text = new fabric.IText('Escribe algo...', {
+                left: defaultCoords.left, top: defaultCoords.top, originX: 'center', originY: 'center',
+                fontFamily: fontFamilySelect.value,
+                fontSize: parseInt(fontSizeInput.value),
+                fill: textColorInput.value,
+                padding: 5,
+                name: 'custom_text'
+            });
+            const activePageForObject = getActivePage();
+            if (activePageForObject) {
+                text.hostPageId = activePageForObject.name;
+            }
+            canvas.add(text).setActiveObject(text).renderAll();
+            text.enterEditing(); text.selectAll();
+            debouncedSaveState();
+        });
+        function addPresetTextToCanvas(type, dropCoords) {
+            let text = "Texto"; let fontSize = 20; let fontWeight = 'normal'; let fontFamily = 'Arial';
+            if (type === 'title') { text = "Añadir un título"; fontSize = 48; fontWeight = 'bold'; fontFamily = 'Libre Baskerville'; }
+            else if (type === 'subtitle') { text = "Añadir un subtítulo"; fontSize = 32; fontWeight = '500'; fontFamily = 'Libre Baskerville'; }
+            else if (type === 'body') { text = "Añadir un poco de texto"; fontSize = 16; fontFamily = 'Arial'; }
+            const newText = new fabric.IText(text, {
+                left: dropCoords.x, top: dropCoords.y, originX: 'center', originY: 'center',
+                fontFamily: fontFamily, fontSize: fontSize, fontWeight: fontWeight, fill: '#333333', padding: 5,
+                name: `preset_text_${type}`
+            });
+            const activePageForObject = getActivePage();
+            if (activePageForObject) {
+                newText.hostPageId = activePageForObject.name;
+            }
+            canvas.add(newText); canvas.setActiveObject(newText); newText.enterEditing(); newText.selectAll();
+            canvas.renderAll(); updateTextControlsFromSelection(); debouncedSaveState();
+        }
+        fontFamilySelect.addEventListener('change', (e) => updateSelectedText('fontFamily', e.target.value));
+        fontSizeInput.addEventListener('input', (e) => { 
+             if (parseInt(e.target.value) >= 8) updateSelectedText('fontSize', parseInt(e.target.value));
+        });
+        fontBoldBtn.addEventListener('click', () => toggleSelectedTextStyle('fontWeight', 'bold', 'normal'));
+        fontItalicBtn.addEventListener('click', () => toggleSelectedTextStyle('fontStyle', 'italic', 'normal'));
+        fontUnderlineBtn.addEventListener('click', () => {
+            const activeObject = canvas.getActiveObject();
+            if (activeObject && activeObject.type && activeObject.type.includes('text') && !activeObject.isPage) {
+                const isUnderlined = activeObject.underline === true;
+                updateSelectedText('underline', !isUnderlined);
+                fontUnderlineBtn.classList.toggle('active-tool', !isUnderlined);
+            }
+        });
+        textColorInput.addEventListener('change', (e) => updateSelectedText('fill', e.target.value));
+        function updateSelectedText(property, value) {
+            const activeObject = canvas.getActiveObject();
+            if (activeObject && activeObject.type && activeObject.type.includes('text') && !activeObject.isPage) {
+                activeObject.set(property, value);
+                canvas.renderAll();
+                debouncedSaveState();
+            }
+        }
+        function toggleSelectedTextStyle(property, activeValue, normalValue) {
+            const activeObject = canvas.getActiveObject();
+            if (activeObject && activeObject.type && activeObject.type.includes('text') && !activeObject.isPage) {
+                const currentVal = activeObject.get(property);
+                const newValue = currentVal === activeValue ? normalValue : activeValue;
+                activeObject.set(property, newValue);
+                if (property === 'fontWeight') fontBoldBtn.classList.toggle('active-tool', newValue === activeValue);
+                if (property === 'fontStyle') fontItalicBtn.classList.toggle('active-tool', newValue === activeValue);
+                canvas.renderAll();
+                debouncedSaveState();
+            }
+        }
+        function updateTextControlsFromSelection() {
+            const activeObject = canvas.getActiveObject();
+            if (activeObject && activeObject.type && activeObject.type.includes('text') && !activeObject.isPage && activeObject.type !== 'activeSelection') {
+                if (currentTool !== 'text') { 
+                    setActiveTool('text', addTextBtn, [textControlsContainer, opacityControlsContainer]);
+                }
+                fontFamilySelect.value = activeObject.fontFamily || 'Arial';
+                fontSizeInput.value = activeObject.fontSize || 20;
+                textColorInput.value = activeObject.fill || '#000000';
+                fontBoldBtn.classList.toggle('active-tool', activeObject.fontWeight === 'bold');
+                fontItalicBtn.classList.toggle('active-tool', activeObject.fontStyle === 'italic');
+                fontUnderlineBtn.classList.toggle('active-tool', activeObject.underline === true);
+            } else if (currentTool === 'text') {
+                addTextBtn.classList.remove('active-tool');
+                if (!canvas.isDrawingMode && (!activeObject || activeObject.isPage || activeObject.type === 'activeSelection')) {
+                    opacityControlsContainer.classList.remove('active');
+                }
+                if (!activeObject || activeObject.isPage || (activeObject.type && !activeObject.type.includes('text')) || activeObject.type === 'activeSelection' ) {
+                    textControlsContainer.classList.remove('active');
+                }
+                if (!textControlsContainer.classList.contains('active') && !drawingControlsContainer.classList.contains('active')) {
+                    currentTool = null; 
+                }
+            }
+        }
+
+        // Drawing Tool
+        drawingModeBtn.addEventListener('click', () => {
+            if (currentTool === 'draw') { hideAllContextualToolbars(); return; }
+            setActiveTool('draw', drawingModeBtn, [drawingControlsContainer, opacityControlsContainer]);
+            canvas.freeDrawingBrush.color = brushColorInput.value;
+            canvas.freeDrawingBrush.width = parseInt(brushSizeInput.value, 10);
+            const opacityValue = parseInt(opacitySlider.value) / 100;
+            canvas.freeDrawingBrush.color = fabric.Color.fromHex(brushColorInput.value).setAlpha(opacityValue).toRgba();
+
+        });
+        brushColorInput.addEventListener('change', (e) => {
+            if (canvas.isDrawingMode) {
+                 const opacityValue = parseInt(opacitySlider.value) / 100;
+                 canvas.freeDrawingBrush.color = fabric.Color.fromHex(e.target.value).setAlpha(opacityValue).toRgba();
+            }
+        });
+        brushSizeInput.addEventListener('input', (e) => {
+            const size = parseInt(e.target.value, 10);
+            brushSizeLabel.textContent = size;
+            if (canvas.isDrawingMode) canvas.freeDrawingBrush.width = size;
+        });
+        opacitySlider.addEventListener('input', (e) => {
+            if (currentTool === 'draw' && canvas.isDrawingMode) {
+                const opacityValue = parseInt(e.target.value) / 100;
+                canvas.freeDrawingBrush.color = fabric.Color.fromHex(brushColorInput.value).setAlpha(opacityValue).toRgba();
+            }
+        });
+
+
+        // --- General Object Manipulation (from top bar or context menu) ---
+        function duplicateObject(obj) {
+            if (!obj || obj.isPage) return;
+             obj.clone(function(clonedObj) {
+                canvas.discardActiveObject();
+                clonedObj.set({
+                    left: clonedObj.left + 10 / (canvas.getZoom() || 1),
+                    top: clonedObj.top + 10 / (canvas.getZoom() || 1),
+                    evented: true
+                });
+                if (obj.hostPageId) { 
+                    clonedObj.hostPageId = obj.hostPageId;
+                }
+                if (clonedObj.type === 'activeSelection') { 
+                    clonedObj.canvas = canvas;
+                    clonedObj.forEachObject(o => canvas.add(o));
+                    clonedObj.setCoords(); 
+                } else {
+                    canvas.add(clonedObj);
+                }
+                canvas.setActiveObject(clonedObj).requestRenderAll();
+                debouncedSaveState();
+            }, ['name', '_customId', 'hostPageId']); 
+        }
+        function deleteObject(obj) {
+            if (!obj || obj.isPage) return;
+            if (obj.type === 'activeSelection') {
+                obj.forEachObject(o => canvas.remove(o));
+                canvas.discardActiveObject();
+            } else {
+                canvas.remove(obj);
+            }
+            canvas.renderAll();
+            debouncedSaveState();
+        }
+        function toggleLockState(obj) {
+            if (!obj) return;
+            const currentSelectableState = obj.selectable;
+            const isPage = obj.isPage === true;
+
+            obj.set({
+                selectable: !currentSelectableState,
+                evented: isPage ? true : !currentSelectableState, 
+            });
+
+            if (isPage) {
+                obj.hasControls = !currentSelectableState; 
+                if (obj.hasControls) {
+                     obj.setControlsVisibility({mtr:false, mt:false, mb:false, ml:false, mr:false, tl:true, tr:true, bl:true, br:true});
+                } else {
+                     obj.setControlsVisibility({mtr:false, mt:false, mb:false, ml:false, mr:false, tl:false, tr:false, bl:false, br:false});
+                }
+                if(obj === getActivePage()) updatePageControlsState(); 
+            }
+            debouncedSaveState();
+            canvas.renderAll();
+        }
+
+        bringForwardBtn.addEventListener('click', () => { const activeObject = canvas.getActiveObject(); if (activeObject && !activeObject.isPage) { canvas.bringForward(activeObject); canvas.renderAll(); debouncedSaveState(); } });
+        sendBackwardBtn.addEventListener('click', () => {
+            const activeObject = canvas.getActiveObject();
+            const activeP = getActivePage();
+            if (activeObject && !activeObject.isPage) {
+                canvas.sendBackwards(activeObject);
+                if (activeP) { 
+                    const objZ = canvas.getObjects().indexOf(activeObject);
+                    const pageZ = canvas.getObjects().indexOf(activeP);
+                    if(objZ < pageZ) canvas.moveTo(activeObject, pageZ + 1);
+                }
+                canvas.renderAll();
+                debouncedSaveState();
+            }
+        });
+        
+        // --- Custom Context Menu Logic ---
+        document.addEventListener('click', function(e) { 
+            if (customContextMenu && customContextMenu.style.display === 'block' && !customContextMenu.contains(e.target) && e.target.tagName !== 'CANVAS' && !e.target.closest('.canvas-wrapper') && !e.target.closest('.action-icon-btn')) {
+                 customContextMenu.style.display = 'none';
+            }
+        });
+        customContextMenu.addEventListener('click', function(e) {
+            const action = e.target.dataset.action;
+            let activeObject = canvas.getActiveObject();
+            if (!activeObject || !action) { customContextMenu.style.display = 'none'; return; }
+            
+            const isPage = activeObject.isPage === true;
+
+            switch(action) {
+                case 'duplicate':
+                    if (isPage) {
+                        if (pageRects.length >= MAX_PAGES) {
+                            alert(`No se puede duplicar la página. Has alcanzado el límite máximo de ${MAX_PAGES} páginas.`);
+                            customContextMenu.style.display = 'none';
+                            return; 
+                        }
+                        const pageProps = activeObject.toObject(['left', 'top', 'width', 'height', 'scaleX', 'scaleY', 'fill', 'shadow', 'visible', 'selectable', 'evented', 'name', 'cornerSizeBase']);
+                        const spacing = (activeObject.getScaledWidth() * 0.1) + (20 / (canvas.getZoom() || 1));
+                        pageProps.left = activeObject.left + activeObject.getScaledWidth() + spacing;
+                        pageProps.top = activeObject.top;
+                        pageProps.name = `__pageRect_${Date.now()}_${pageRects.length}`;
+                        addPage(pageProps); 
+                    } else {
+                        duplicateObject(activeObject);
+                    }
+                    break;
+                case 'delete':
+                    if (isPage) {
+                        if (confirm("¿Estás seguro de que quieres eliminar esta página y todo su contenido?")) {
+                           deletePage(activeObject);
+                        }
+                    } else {
+                        deleteObject(activeObject);
+                    }
+                    break;
+                case 'lock':
+                    toggleLockState(activeObject);
+                    break;
+                case 'bringForward': if (!isPage) canvas.bringForward(activeObject); debouncedSaveState(); break;
+                case 'sendBackward':
+                    if (!isPage) {
+                        canvas.sendBackwards(activeObject);
+                        const activeP = getActivePage();
+                        if(activeP){
+                            const objZ = canvas.getObjects().indexOf(activeObject);
+                            const pageZ = canvas.getObjects().indexOf(activeP);
+                            if(objZ < pageZ) canvas.moveTo(activeObject, pageZ + 1);
+                        }
+                        debouncedSaveState();
+                    }
+                    break;
+                case 'bringToFront': if (!isPage) canvas.bringToFront(activeObject); debouncedSaveState(); break;
+                case 'sendToBack':
+                    if (!isPage) {
+                        canvas.sendToBack(activeObject);
+                        const activeP = getActivePage();
+                        if(activeP){
+                             const pageZ = canvas.getObjects().indexOf(activeP);
+                             canvas.moveTo(activeObject, pageZ + 1);
+                        }
+                        debouncedSaveState();
+                    }
+                    break;
+            }
+            canvas.renderAll();
+            customContextMenu.style.display = 'none';
+        });
+
+        // --- Notes Modal ---
+        notesBtn.addEventListener('click', () => notesModal.classList.add('active'));
+        closeNotesModalBtn.addEventListener('click', () => notesModal.classList.remove('active'));
+        saveNotesBtn.addEventListener('click', () => { localStorage.setItem('editorNotes', notesTextarea.value); notesModal.classList.remove('active'); alert('Notas guardadas!'); });
+        function loadNotes() { notesTextarea.value = localStorage.getItem('editorNotes') || ''; }
+
+        // --- Layers Panel Modal ---
+        layersPanelBtn.addEventListener('click', () => { updateLayersPanel(); layersModal.classList.add('active'); });
+        closeLayersModalBtn.addEventListener('click', () => layersModal.classList.remove('active'));
+        function updateLayersPanel() {
+            layersListContainer.innerHTML = '';
+            const activeP = getActivePage();
+            const pageZIndex = activeP ? canvas.getObjects().indexOf(activeP) : -1;
+
+            const objects = canvas.getObjects().filter(obj => !obj.isPage);
+
+            objects.slice().reverse().forEach((obj) => { 
+                const itemDiv = document.createElement('div');
+                itemDiv.className = 'layer-item';
+                if (canvas.getActiveObject() === obj) itemDiv.classList.add('selected');
+
+                const nameSpan = document.createElement('span');
+                nameSpan.className = 'layer-name';
+                nameSpan.textContent = obj._customId || obj.name || `${obj.type || 'Objeto'}`;
+                nameSpan.title = nameSpan.textContent;
+                nameSpan.onclick = () => { canvas.setActiveObject(obj); canvas.renderAll(); updateLayersPanel(); };
+
+                const actionsDiv = document.createElement('div');
+                actionsDiv.className = 'layer-actions';
+
+                const visibilityBtn = document.createElement('button');
+                visibilityBtn.innerHTML = obj.visible ? svgIconVisible : svgIconHidden;
+                visibilityBtn.title = obj.visible ? "Ocultar" : "Mostrar";
+                visibilityBtn.onclick = () => { 
+                    obj.visible = !obj.visible; 
+                    canvas.renderAll(); updateLayersPanel(); debouncedSaveState(); 
+                };
+
+                const deleteBtnElement = document.createElement('button');
+                deleteBtnElement.innerHTML = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"></path></svg>';
+                deleteBtnElement.title = "Eliminar";
+                deleteBtnElement.onclick = () => { canvas.remove(obj); canvas.renderAll(); updateLayersPanel(); debouncedSaveState(); };
+
+                const upBtn = document.createElement('button');
+                upBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M7.41 15.41L12 10.83l4.59 4.58L18 14l-6-6-6 6z"></path></svg>';
+                upBtn.title = "Mover arriba";
+                upBtn.disabled = canvas.getObjects().indexOf(obj) === canvas.getObjects().length - 1;
+                upBtn.onclick = () => { canvas.bringForward(obj); canvas.renderAll(); updateLayersPanel(); debouncedSaveState(); };
+
+                const downBtn = document.createElement('button');
+                downBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6z"></path></svg>';
+                downBtn.title = "Mover abajo";
+                const currentZ = canvas.getObjects().indexOf(obj);
+                let lowestPossibleZ = 0;
+                const highestPageZ = Math.max(...pageRects.map(p => canvas.getObjects().indexOf(p)).filter(z => z !== -1), -1);
+                if (highestPageZ !== -1) lowestPossibleZ = highestPageZ + 1;
+                downBtn.disabled = currentZ <= lowestPossibleZ;
+
+                downBtn.onclick = () => {
+                    canvas.sendBackwards(obj);
+                    const objZ = canvas.getObjects().indexOf(obj);
+                    if (activeP && objZ < pageZIndex) { 
+                        canvas.moveTo(obj, pageZIndex + 1);
+                    } else if (pageRects.length > 0 && objZ <= highestPageZ) { 
+                         canvas.moveTo(obj, highestPageZ + 1);
+                    }
+                    canvas.renderAll(); updateLayersPanel(); debouncedSaveState();
+                };
+
+                actionsDiv.appendChild(visibilityBtn);
+                actionsDiv.appendChild(upBtn);
+                actionsDiv.appendChild(downBtn);
+                actionsDiv.appendChild(deleteBtnElement);
+                itemDiv.appendChild(nameSpan);
+                itemDiv.appendChild(actionsDiv);
+                layersListContainer.appendChild(itemDiv);
+            });
+        }
+
+        // --- Export Functionality ---
+        exportResolutionSlider.addEventListener('input', function() {
+            currentExportMultiplier = parseFloat(this.value);
+            exportResolutionValue.textContent = `${currentExportMultiplier.toFixed(1)}x`;
+        });
+        exportBtnMain.addEventListener('click', (e) => { e.stopPropagation(); exportOptionsDropdown.classList.toggle('active'); });
+        document.body.addEventListener('click', (e) => { if (!exportBtnMain.contains(e.target) && !exportOptionsDropdown.contains(e.target)) { exportOptionsDropdown.classList.remove('active'); } });
+
+        function getExportClipRectForPage(pageObject) {
+            if (pageObject && pageObject.isPage && pageObject.visible) {
+                const bounds = pageObject.getBoundingRect(false, true);
+                return { left: bounds.left, top: bounds.top, width: bounds.width, height: bounds.height, pageRef: pageObject };
+            }
+            return null;
+        }
+        function downloadDataURL(dataURL, filename) { const a = document.createElement('a'); a.href = dataURL; a.download = filename; document.body.appendChild(a); a.click(); document.body.removeChild(a); }
+
+        function exportPageAsImage(pageObject, format = 'png', pageIndexForFilename) {
+            if (!pageObject || !pageObject.visible) { console.warn(`Página ${pageIndexForFilename + 1} no visible o inválida.`); return null; }
+            const clipRect = getExportClipRectForPage(pageObject);
+            if (!clipRect) { console.error("Error al obtener clipRect para exportar."); return null; }
+
+            const originalBg = canvas.backgroundColor;
+            if (format === 'jpeg') canvas.backgroundColor = 'white';
+
+            const originalStroke = pageObject.stroke; 
+            const originalStrokeWidth = pageObject.strokeWidth;
+            pageObject.set({ stroke: 'rgba(0,0,0,0)', strokeWidth: 0 }); 
+            canvas.renderAll();
+
+            const dataURL = canvas.toDataURL({
+                format: format,
+                quality: format === 'jpeg' ? 0.92 : 1.0, 
+                left: clipRect.left,
+                top: clipRect.top,
+                width: clipRect.width,
+                height: clipRect.height,
+                multiplier: currentExportMultiplier
+            });
+            
+            pageObject.set({ stroke: originalStroke, strokeWidth: originalStrokeWidth }); 
+            if (format === 'jpeg') canvas.backgroundColor = originalBg;
+
+            return { dataURL: dataURL, filename: `pagina_${pageIndexForFilename + 1}.${format}` };
+        }
+        exportActivePagePngBtn.addEventListener('click', () => {
+            exportOptionsDropdown.classList.remove('active');
+            const activeP = getActivePage();
+            if (activeP) {
+                const exportData = exportPageAsImage(activeP, 'png', activePageIndex);
+                if (exportData) downloadDataURL(exportData.dataURL, exportData.filename);
+                else alert("No se pudo exportar la página activa como PNG.");
+                canvas.renderAll(); 
+            } else alert("No hay página activa seleccionada.");
+        });
+        exportActivePageJpgBtn.addEventListener('click', () => {
+            exportOptionsDropdown.classList.remove('active');
+            const activeP = getActivePage();
+            if (activeP) {
+                const exportData = exportPageAsImage(activeP, 'jpeg', activePageIndex);
+                if (exportData) downloadDataURL(exportData.dataURL, exportData.filename);
+                else alert("No se pudo exportar la página activa como JPG.");
+                canvas.renderAll();
+            } else alert("No hay página activa seleccionada.");
+        });
+        async function exportAllPagesAsImagesToZip(format = 'png') {
+            exportOptionsDropdown.classList.remove('active');
+            const visiblePages = pageRects.filter(p => p.visible);
+            if (visiblePages.length === 0) { alert("No hay páginas visibles para exportar."); return; }
+
+            const zip = new JSZip(); let exportCount = 0;
+            for (let i = 0; i < visiblePages.length; i++) {
+                const page = visiblePages[i];
+                const pageIndexInOriginalArray = pageRects.indexOf(page);
+                const exportData = exportPageAsImage(page, format, pageIndexInOriginalArray);
+                if (exportData) {
+                    const base64Data = exportData.dataURL.substring(exportData.dataURL.indexOf(',') + 1);
+                    zip.file(exportData.filename, base64Data, { base64: true });
+                    exportCount++;
+                }
+            }
+            canvas.renderAll(); 
+
+            if (exportCount > 0) {
+                try {
+                    const content = await zip.generateAsync({ type: "blob" });
+                    downloadDataURL(URL.createObjectURL(content), `todas_paginas_${format}.zip`);
+                    alert(`${exportCount} páginas exportadas al archivo ZIP.`);
+                } catch (err) {
+                    console.error("Error generando el archivo ZIP:", err); alert("Error al generar el archivo ZIP.");
+                }
+            } else {
+                alert("No se pudo exportar ninguna página.");
+            }
+        }
+        exportAllPagesPngBtn.addEventListener('click', () => exportAllPagesAsImagesToZip('png'));
+        exportAllPagesJpgBtn.addEventListener('click', () => exportAllPagesAsImagesToZip('jpeg'));
+
+        async function exportPageToPdf(pageObject, pageIndexForFilename, existingPdf = null) {
+            if (!pageObject || !pageObject.visible) return existingPdf;
+            const clipRect = getExportClipRectForPage(pageObject);
+            if (!clipRect) return existingPdf;
+
+            const originalBg = canvas.backgroundColor;
+            canvas.backgroundColor = 'white';
+            const originalStroke = pageObject.stroke;
+            const originalStrokeWidth = pageObject.strokeWidth;
+            pageObject.set({ stroke: 'rgba(0,0,0,0)', strokeWidth: 0 });
+            canvas.renderAll();
+
+            const dataURL = canvas.toDataURL({
+                format: 'png', left: clipRect.left, top: clipRect.top,
+                width: clipRect.width, height: clipRect.height, multiplier: currentExportMultiplier
+            });
+            
+            pageObject.set({ stroke: originalStroke, strokeWidth: originalStrokeWidth });
+            canvas.backgroundColor = originalBg;
+
+            try {
+                const pdfW = clipRect.width; 
+                const pdfH = clipRect.height; 
+
+                let pdf = existingPdf;
+                if (!pdf) {
+                    pdf = new jsPDF({ orientation: pdfW > pdfH ? 'l' : 'p', unit: 'px', format: [pdfW, pdfH] });
+                } else {
+                    pdf.addPage([pdfW, pdfH], pdfW > pdfH ? 'l' : 'p');
+                }
+                pdf.addImage(dataURL, 'PNG', 0, 0, pdfW, pdfH);
+                return pdf;
+            } catch (error) {
+                console.error(`Error generando PDF para página ${pageIndexForFilename + 1}:`, error);
+                pageObject.set({ stroke: originalStroke, strokeWidth: originalStrokeWidth }); 
+                return existingPdf;
+            }
+        }
+        exportActivePagePdfBtn.addEventListener('click', async () => {
+            exportOptionsDropdown.classList.remove('active');
+            const activeP = getActivePage();
+            if (activeP) {
+                const pdf = await exportPageToPdf(activeP, activePageIndex, null);
+                if (pdf) pdf.save(`pagina_${activePageIndex + 1}.pdf`);
+                else alert("No se pudo exportar la página activa como PDF.");
+                canvas.renderAll(); 
+            } else alert("No hay página activa seleccionada para exportar.");
+        });
+        exportAllPagesPdfBtn.addEventListener('click', async () => {
+            exportOptionsDropdown.classList.remove('active');
+            const visiblePages = pageRects.filter(p => p.visible);
+            if (visiblePages.length === 0) { alert("No hay páginas visibles para exportar."); return; }
+
+            let pdf = null;
+            for (let i = 0; i < visiblePages.length; i++) {
+                const page = visiblePages[i];
+                const pageIndexInOriginalArray = pageRects.indexOf(page);
+                pdf = await exportPageToPdf(page, pageIndexInOriginalArray, pdf);
+                if (!pdf && i === 0) { alert("Error al generar PDF para la primera página. Abortando."); canvas.renderAll(); return; }
+            }
+            if (pdf) pdf.save('diseño_completo.pdf');
+            else if (visiblePages.length > 0) alert("No se pudo generar el PDF completo.");
+            canvas.renderAll(); 
+        });
+
+        // --- Project Save/Load ---
+        const propsToSaveProject = ['name', '_customId', 'id', 'selectable', 'evented', 'hasControls', 'hasBorders', 'opacity', 'isPage', 'visible', 'cornerSizeBase', 'shadow', 'fill', 'stroke', 'strokeWidth', 'scaleX', 'scaleY', 'left', 'top', 'width', 'height', 'angle', 'flipX', 'flipY', 'skewX', 'skewY', 'fontFamily', 'fontSize', 'fontWeight', 'fontStyle', 'underline', 'textAlign', 'text', 'path', 'clipPath', 'hostPageId']; 
+
+        function saveProject(promptForName = false) {
+            let projectName = localStorage.getItem('currentProjectName') || "mi_proyecto";
+            if (promptForName) {
+                const newName = prompt("Introduce el nombre del archivo del proyecto:", projectName.replace(".canvaedit", ""));
+                if (newName === null ) return;
+                if (newName.trim() === "") { alert("Nombre de archivo no válido."); return; }
+                projectName = newName.trim();
+            }
+            if (!projectName.toLowerCase().endsWith(".canvaedit")) projectName += ".canvaedit";
+            localStorage.setItem('currentProjectName', projectName);
+
+            const projectData = {
+                version: "1.1.3", 
+                canvasState: canvas.toDatalessJSON(propsToSaveProject),
+                pagesState: pageRects.map(p => p.toObject(propsToSaveProject)),
+                activePageIndex: activePageIndex,
+                uploadedImages: uploadedImages,
+                viewportTransform: canvas.viewportTransform,
+                currentExportMultiplier: currentExportMultiplier
+            };
+            const dataStr = JSON.stringify(projectData, null, 2);
+            const dataUri = 'data:application/json;charset=utf-8,'+ encodeURIComponent(dataStr);
+            downloadDataURL(dataUri, projectName);
+        }
+        saveProjectBtn.addEventListener('click', () => saveProject(false));
+        saveAsProjectBtn.addEventListener('click', () => saveProject(true));
+
+        loadProjectBtn.addEventListener('click', () => projectFileInput.click());
+        projectFileInput.addEventListener('change', (event) => {
+            const file = event.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    try {
+                        const projectData = JSON.parse(e.target.result);
+                        loadProjectState(projectData);
+                        localStorage.setItem('currentProjectName', file.name);
+                    } catch (err) {
+                        console.error("Error cargando proyecto:", err);
+                        alert("No se pudo cargar el archivo del proyecto. Formato inválido.");
+                    }
+                };
+                reader.readAsText(file);
+                projectFileInput.value = '';
+            }
+        });
+
+        function loadProjectState(projectData) {
+            isApplyingState = true;
+            canvas.clear();
+            pageRects = [];
+            activePageIndex = -1;
+
+            uploadedImages = projectData.uploadedImages || [];
+            updateSidebarImageList();
+
+            currentExportMultiplier = parseFloat(projectData.currentExportMultiplier) || 2.5;
+            exportResolutionSlider.value = currentExportMultiplier;
+            exportResolutionValue.textContent = `${currentExportMultiplier.toFixed(1)}x`;
+
+            canvas.loadFromJSON(projectData.canvasState, () => {
+                const loadedViewportTransform = projectData.viewportTransform || canvas.viewportTransform;
+                const currentZoom = loadedViewportTransform[0];
+                const safeZoomForDivision = (currentZoom > 0.01) ? currentZoom : 0.01;
+                const actualCanvasPages = [];
+
+                canvas.getObjects().forEach(obj => {
+                    if (obj.isPage) {
+                        actualCanvasPages.push(obj);
+                        const savedPageState = projectData.pagesState?.find(ps => ps.name === obj.name);
+                        if (savedPageState) {
+                            Object.keys(savedPageState).forEach(key => {
+                               if (propsToSaveProject.includes(key)) obj[key] = savedPageState[key];
+                            });
+                        }
+                        obj.cornerSizeBase = obj.cornerSizeBase || PAGE_CORNER_SIZE;
+                        obj.cornerSize = obj.cornerSizeBase / safeZoomForDivision;
+                        obj.strokeWidth = (obj.name === projectData.pagesState?.[projectData.activePageIndex]?.name ? PAGE_ACTIVE_STROKE_WIDTH : PAGE_STROKE_WIDTH) / safeZoomForDivision;
+                        obj.evented = true;
+                        if (obj.selectable) {
+                            obj.setControlsVisibility({mtr:false, mt:false, mb:false, ml:false, mr:false, tl:true, tr:true, bl:true, br:true});
+                            obj.hasControls = true;
+                        } else {
+                            obj.setControlsVisibility({mtr:false, mt:false, mb:false, ml:false, mr:false, tl:false, tr:false, bl:false, br:false});
+                            obj.hasControls = false;
+                        }
+                        canvas.sendToBack(obj);
+                    } else {
+                        obj.setControlsVisibility({ mtr: true, mt: false, mb: false, ml: false, mr: false });
+                    }
+                });
+                pageRects = actualCanvasPages.sort((a,b) => (a.name > b.name) ? 1 : ((b.name > a.name) ? -1 : 0));
+
+
+                if (projectData.viewportTransform) canvas.setViewportTransform(projectData.viewportTransform);
+                
+                const savedActiveIndex = projectData.activePageIndex;
+                if (savedActiveIndex !== undefined && savedActiveIndex >=0 && savedActiveIndex < pageRects.length) {
+                    setActivePage(savedActiveIndex, false); 
+                } else if (pageRects.length > 0) {
+                    setActivePage(0, false);
+                } else {
+                    addPage({}, true); 
+                    setActivePage(0, false);
+                }
+                
+                updateZoomUI(); 
+                updateLayersPanel();
+                updateObjectCoordinateDisplay();
+                updatePageControlsState();
+                
+                isApplyingState = false;
+                undoStack = []; redoStack = []; 
+                saveCanvasState(true); 
+                updateUndoRedoButtons();
+                canvas.renderAll();
+                alert("Proyecto cargado.");
+            });
+        }
+
+        // --- Page Navigation and Size Controls ---
+        addNewPageBtn.addEventListener('click', () => addPage());
+        deleteActivePageBtn.addEventListener('click', () => {
+            const activeP = getActivePage();
+            if (activeP) {
+                if (confirm("¿Estás seguro de que quieres eliminar esta página y todo su contenido?")) {
+                    deletePage(activeP);
+                }
+            }
+        });
+        prevPageBtn.addEventListener('click', () => { if (activePageIndex > 0) setActivePage(activePageIndex - 1); });
+        nextPageBtn.addEventListener('click', () => { if (activePageIndex < pageRects.length - 1) setActivePage(activePageIndex + 1); });
+
+        togglePageVisibilityBtn.addEventListener('click', () => {
+            const activeP = getActivePage();
+            if (activeP) {
+                const newVisibility = !activeP.visible;
+                activeP.visible = newVisibility;
+
+                canvas.getObjects().forEach(obj => {
+                    if (obj.hostPageId === activeP.name && obj !== activeP) {
+                        obj.visible = newVisibility;
+                    }
+                });
+                
+                togglePageVisibilityBtn.innerHTML = activeP.visible ? svgIconVisible : svgIconHidden;
+                togglePageVisibilityBtn.classList.toggle('active', activeP.visible);
+                canvas.renderAll(); 
+                debouncedSaveState();
+
+                 if (!activeP.visible) { 
+                    const nextVisiblePage = pageRects.find(p => p.visible && p !== activeP);
+                    centerCanvasOnPage(nextVisiblePage || null);
+                } else {
+                     centerCanvasOnPage(activeP); 
+                }
+            }
+        });
+        pageSizeToggleBtn.addEventListener('click', () => {
+            const activeP = getActivePage();
+            if (!activeP) { pageSizeControls.style.display = 'none'; return; }
+            pageSizeControls.style.display = pageSizeControls.style.display === 'none' ? 'flex' : 'none';
+            if (pageSizeControls.style.display === 'flex') updatePageControlsState();
+        });
+        function updateActivePageSize() {
+            const activeP = getActivePage();
+            if (!activeP || !activeP.selectable) return; 
+            const newWidth = parseInt(pageWidthInput.value) || PAGE_DEFAULT_WIDTH;
+            const newHeight = parseInt(pageHeightInput.value) || PAGE_DEFAULT_HEIGHT;
+            activeP.set({ width: newWidth, height: newHeight, scaleX: 1, scaleY: 1 });
+            activeP.setCoords();
+            centerCanvasOnPage(activeP);
+            debouncedSaveState();
+        }
+        pageWidthInput.addEventListener('input', debounce(updateActivePageSize, 300));
+        pageHeightInput.addEventListener('input', debounce(updateActivePageSize, 300));
+
+        // --- Keyboard Shortcuts & Utility ---
+        document.addEventListener('keydown', function(e) {
+            const activeElement = document.activeElement;
+            if (activeElement.tagName === 'INPUT' || activeElement.tagName === 'TEXTAREA') return; 
+
+            if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); undoBtn.click(); }
+            if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') { e.preventDefault(); redoBtn.click(); }
+            
+            if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+                e.preventDefault(); 
+                saveProjectBtn.click(); 
+            }
+            
+            if (e.key === 'Delete' || e.key === 'Backspace') {
+                const activeObject = canvas.getActiveObject();
+                if (activeObject) {
+                    if (activeObject.isPage && activeObject === getActivePage()) {
+                    } else if (!activeObject.isPage && !activeObject.isEditing) {
+                        deleteObject(activeObject);
+                        objectActionsToolbar.style.display = 'none';
+                    }
+                }
+            }
+        });
+        function debounce(func, wait) { let timeout; return function(...args) { const context = this; clearTimeout(timeout); timeout = setTimeout(() => func.apply(context, args), wait); }; }
+        function updateObjectCoordinateDisplay() {
+            const activeObject = canvas.getActiveObject();
+            const currentPage = getActivePage();
+            if (activeObject && !activeObject.isPage && activeObject.type !== 'activeSelection') {
+                const bound = activeObject.getBoundingRect(false, true); 
+                let displayX = bound.left;
+                let displayY = bound.top;
+                if (currentPage) { 
+                    const pageBound = currentPage.getBoundingRect(false, true);
+                    displayX -= pageBound.left;
+                    displayY -= pageBound.top;
+                }
+                objectCoordinatesDisplay.textContent = `X: ${Math.round(displayX)}, Y: ${Math.round(displayY)}`;
+            } else {
+                objectCoordinatesDisplay.textContent = `X: --, Y: --`;
+            }
+        }
+
+        init(); 
+    });
+    </script>
+</body>
+</html>
